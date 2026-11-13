@@ -1,0 +1,67 @@
+using ProjectIGI.Core.Graphics;
+using ProjectIGI.Core.Numerics;
+using ProjectIGI.Game.Player;
+using ProjectIGI.Rendering;
+
+namespace ProjectIGI.Presentation.Rendering;
+
+/// <summary>How a body the binoculars marked is highlighted, for whichever title draws it.</summary>
+/// <remarks>
+/// <b>Not retail</b>: retail marks a contact with a rectangle on the detector. Two looks, by <see cref="HudCVars.BinocularSilhouette"/>:
+/// the silhouette highlight, a fill inside a soft outline laid over the finished picture by the marker's group, or a glow in
+/// the marker's colour drawn into the scene. Both seen through walls.
+/// </remarks>
+public static class BinocularMarking
+{
+    /// <summary>The glow a marker takes when the highlight is not drawn in the silhouette style.</summary>
+    /// <param name="marker">The detector's class of contact.</param>
+    /// <returns>Red for a hostile, green for anyone else, blue for one out of the fight — yellow for one seen in infrared.</returns>
+    public static Bgra32 Glow(BinocularMarkerColor marker) => marker switch
+    {
+        BinocularMarkerColor.Team => Bgra32.FromRgba(96, 220, 120, 200),
+        BinocularMarkerColor.Disabled => Bgra32.FromRgba(96, 150, 255, 200),
+        BinocularMarkerColor.Thermal => Bgra32.FromRgba(255, 214, 0, 210),
+        _ => Bgra32.FromRgba(255, 72, 72, 210),
+    };
+
+    /// <summary>The silhouette group a marker is highlighted as.</summary>
+    /// <param name="marker">The detector's class of contact.</param>
+    /// <returns>Its group.</returns>
+    public static SilhouetteGroup Group(BinocularMarkerColor marker) => marker switch
+    {
+        BinocularMarkerColor.Team => SilhouetteGroup.Team,
+        BinocularMarkerColor.Disabled => SilhouetteGroup.Disabled,
+        // The thermal marker never reaches a silhouette: Draw always glows it (the
+        // silhouette pass has no yellow group), so this arm is only a fallback.
+        BinocularMarkerColor.Thermal => SilhouetteGroup.Hostile,
+        _ => SilhouetteGroup.Hostile,
+    };
+
+    /// <summary>Highlights one marked body in the look the settings ask for.</summary>
+    /// <param name="device">The device.</param>
+    /// <param name="mesh">The body's mesh.</param>
+    /// <param name="ranges">The index ranges that make up the body.</param>
+    /// <param name="modelView">The transform it was drawn with; its pose is the one currently set on the device.</param>
+    /// <param name="marker">The detector's class of contact.</param>
+    /// <param name="radiusPixels">The glow's screen-space radius, where it is a glow.</param>
+    public static void Draw(
+        IMeshDrawDevice device,
+        MeshHandle mesh,
+        ReadOnlySpan<MeshDrawRange> ranges,
+        in Matrix4f modelView,
+        BinocularMarkerColor marker,
+        float radiusPixels)
+    {
+        ArgumentNullException.ThrowIfNull(device);
+        // The thermal figure is defined as the yellow glow: the silhouette pass has no
+        // yellow group, so a thermal marker always takes the glow, whatever the setting asks for.
+        if (marker == BinocularMarkerColor.Thermal || !HudCVars.BinocularSilhouette.Value)
+        {
+            device.DrawOutline(mesh, ranges, modelView, Glow(marker), radiusPixels, throughWalls: true);
+        }
+        else
+        {
+            device.DrawSilhouette(mesh, ranges, modelView, Group(marker));
+        }
+    }
+}
