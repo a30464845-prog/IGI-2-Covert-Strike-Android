@@ -1039,6 +1039,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
             // and immediately closed it again (or skipped past it).
             return true;
         }
+        if (keyCode == KeyEvent.KEYCODE_GRAVE || keyCode == 68) {
+            NativeEngine.nativeOnKey(keyCode, true);
+            return true;
+        }
         NativeEngine.nativeOnKey(keyCode, true);
         return super.onKeyDown(keyCode, event);
     }
@@ -1046,6 +1050,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
     @Override
     public boolean onKeyUp(int keyCode, KeyEvent event) {
         if (!isGameStarted) return super.onKeyUp(keyCode, event);
+        if (keyCode == KeyEvent.KEYCODE_GRAVE || keyCode == 68) {
+            NativeEngine.nativeOnKey(keyCode, false);
+            return true;
+        }
         NativeEngine.nativeOnKey(keyCode, false);
         return super.onKeyUp(keyCode, event);
     }
@@ -1233,8 +1241,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         // via the keyboard icon in the main menu (under the cheats gear), so player names
         // and other menu text can be typed even when the automatic focus detection does
         // not fire. The icon toggles the request; Back clears it.
-        boolean focused = isGameStarted && (NativeEngine.nativeIsTextFieldFocused()
-            || NativeEngine.nativeIsKeyboardRequested());
+        boolean focused = isGameStarted && NativeEngine.nativeIsKeyboardRequested();
         InputMethodManager imm = (InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
         if (focused && !imeShown) {
             if (hiddenInput != null && imm != null) {
