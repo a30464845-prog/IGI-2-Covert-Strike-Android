@@ -68,9 +68,18 @@ public sealed class Igi2FirstPersonFrame
         BonePose pose = BonePose.Evaluate(skeleton, _rotations, root);
 
         List<TitleViewModelPart> parts = [new TitleViewModelPart(view.ObjectModel, pose, default, Matrix3f.Identity)];
+        Igi2AttachedPart[] attached = [.. Igi2AttachedParts.Of(clip, view.ObjectAnimation.Time, pose, heldModel,
+            attachments is null ? null : attachments.ModelOf)];
+
+        // A model the clip hangs on the pose itself, a magazine over a reload clip, is drawn where the clip puts it
+        // and not again as a rigid nested attachment of the weapon, where it would sit stuck in the gun while the
+        // clip's copy moves in the hands. The weapon itself is never one: its own nested attachments stay. The set
+        // is rebuilt from the clip every frame, so a nested model returns the moment the clip stops hanging it.
+        HashSet<string>? hung = attachments is null ? null : new HashSet<string>(attached
+            .Where(part => !Igi2BodyFrame.IsWeaponObject(part, heldModel))
+            .Select(part => part.Model), StringComparer.OrdinalIgnoreCase);
         int weaponObject = 0;
-        foreach (Igi2AttachedPart part in Igi2AttachedParts.Of(clip, view.ObjectAnimation.Time, pose, heldModel,
-            attachments is null ? null : attachments.ModelOf))
+        foreach (Igi2AttachedPart part in attached)
         {
             TitleViewModelPart rootPart = new(part.Model, null, part.Position, part.Orientation)
             {
@@ -82,7 +91,7 @@ public sealed class Igi2FirstPersonFrame
             }
             else
             {
-                parts.AddRange(attachments.Expand(rootPart));
+                parts.AddRange(attachments.Expand(rootPart, hung));
             }
         }
 

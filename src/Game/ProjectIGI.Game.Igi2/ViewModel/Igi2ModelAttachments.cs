@@ -17,14 +17,15 @@ public sealed class Igi2ModelAttachments(Func<string, MefModel?> models, Igi2Mag
 
     /// <summary>Expands a rigid model's complete attachment tree in the view's local frame.</summary>
     /// <param name="part">The root part, which is also returned.</param>
+    /// <param name="suppressed">The models the clip already hangs, whose nested copies are not drawn, or <see langword="null"/> for none.</param>
     /// <returns>The root and its drawable children, in creation order.</returns>
-    public IEnumerable<TitleViewModelPart> Expand(TitleViewModelPart part)
+    public IEnumerable<TitleViewModelPart> Expand(TitleViewModelPart part, IReadOnlySet<string>? suppressed = null)
     {
         ArgumentNullException.ThrowIfNull(part);
-        return Walk(part, new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+        return Walk(part, new HashSet<string>(StringComparer.OrdinalIgnoreCase), suppressed);
     }
 
-    private IEnumerable<TitleViewModelPart> Walk(TitleViewModelPart part, HashSet<string> ancestors)
+    private IEnumerable<TitleViewModelPart> Walk(TitleViewModelPart part, HashSet<string> ancestors, IReadOnlySet<string>? suppressed)
     {
         yield return part;
         if (part.Pose is not null || ancestors.Count >= 16 || !ancestors.Add(part.Model))
@@ -38,9 +39,12 @@ public sealed class Igi2ModelAttachments(Func<string, MefModel?> models, Igi2Mag
             foreach (MefAttachment attachment in model.Attachments)
             {
                 // modelobj.c ModelObj_CreateAttachObject: names are resolved through MagicObj_GetMagicObjType;
-                // unknown names are rigid models, while configured "none" and shadows draw nothing.
+                // unknown names are rigid models, while configured "none" and shadows draw nothing. A model the
+                // clip hangs on the pose itself is drawn where the clip puts it: its rigid nested copy would sit
+                // stuck in the weapon while the clip's copy moves, as a magazine does over a reload clip.
                 string? name = ModelOf(attachment.Name);
-                if (string.IsNullOrEmpty(name) || string.Equals(name, Igi2MagicObjTypes.NoModel, StringComparison.Ordinal))
+                if (string.IsNullOrEmpty(name) || string.Equals(name, Igi2MagicObjTypes.NoModel, StringComparison.Ordinal)
+                    || (suppressed is not null && suppressed.Contains(name)))
                 {
                     continue;
                 }
@@ -48,7 +52,7 @@ public sealed class Igi2ModelAttachments(Func<string, MefModel?> models, Igi2Mag
                 Igi2Pose child = parent.Attach(attachment);
                 TitleViewModelPart attached = new(name, null,
                     new Vector3f((float)child.Position.X, (float)child.Position.Y, (float)child.Position.Z), child.ToMatrix());
-                foreach (TitleViewModelPart nested in Walk(attached, ancestors))
+                foreach (TitleViewModelPart nested in Walk(attached, ancestors, suppressed))
                 {
                     yield return nested;
                 }
