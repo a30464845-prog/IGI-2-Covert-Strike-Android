@@ -628,6 +628,15 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
                     Log.w(TAG, "Copy manifest mismatch: " + relative + " is not " + expected + " bytes.");
                     return false;
                 }
+                // Sizes match the manifest, but the manifest only records what the source
+                // claimed: a container the source delivered short is short at exactly the
+                // recorded size. Its own header is the independent truth -- a claim larger
+                // than the file means the install is not whole and must be re-picked.
+                String truncation = ilffTruncationError(file, relative);
+                if (truncation != null) {
+                    Log.w(TAG, "Copy manifest rejected: " + truncation);
+                    return false;
+                }
                 checked++;
             }
         } catch (IOException e) {
@@ -734,6 +743,11 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
                 Toast.makeText(this, "I.G.I. 2 game files installed successfully!", Toast.LENGTH_LONG).show();
             });
         } catch (Exception e) {
+            // A failed install must not leave a manifest behind: the manifest is the
+            // "verified" stamp, and a stale one from an earlier copy would re-verify
+            // this folder on the next launch even though this copy just proved it
+            // incomplete. The next launch asks for the folder again instead.
+            new File(targetDataDir, COPY_MANIFEST_NAME).delete();
             Log.e(TAG, "Failed to copy game files", e);
             runOnUiThread(() -> {
                 statusText.setText("COPY ERROR: " + e.getMessage());
@@ -782,6 +796,52 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         return String.format(Locale.US, "%.0f MB", bytes / (1024.0 * 1024.0));
     }
 
+    // Whether a file is a TRUNCATED ILFF container. The header's size field is the total
+    // container size, header included, and retail archives carry exactly the file length
+    // there -- so a header claim larger than the bytes present proves the picked folder's
+    // own copy is short, which no size comparison against the source can ever catch (the
+    // source is the thing that is short). Returns a description of the truncation, or
+    // null when the file is not a verifiable container or is whole. Only the exact
+    // condition the game itself fatals on (claim larger than available) fails here;
+    // anything else -- too short to hold a header, no ILFF magic, a claim the file
+    // satisfies -- passes untouched. The extension is tested against the relative name,
+    // because the temp file a fresh copy is verified in wears a .tmpcopy suffix.
+    private static String ilffTruncationError(File file, String relative) {
+        String lower = relative.toLowerCase(Locale.ROOT);
+        if (!lower.endsWith(".res") && !lower.endsWith(".mef") && !lower.endsWith(".fnt")) {
+            return null;
+        }
+        long length = file.length();
+        byte[] header = new byte[20];
+        int read = 0;
+        try (InputStream in = new FileInputStream(file)) {
+            while (read < header.length) {
+                int n = in.read(header, read, header.length - read);
+                if (n == -1) {
+                    break;
+                }
+                read += n;
+            }
+        } catch (IOException e) {
+            return null;
+        }
+        if (read < header.length) {
+            return null;
+        }
+        if (header[0] != 'I' || header[1] != 'L' || header[2] != 'F' || header[3] != 'F') {
+            return null;
+        }
+        long claimed = (header[4] & 0xFFL)
+            | ((header[5] & 0xFFL) << 8)
+            | ((header[6] & 0xFFL) << 16)
+            | ((header[7] & 0xFFL) << 24);
+        if (claimed <= length) {
+            return null;
+        }
+        return relative + " claims " + claimed + " bytes but only " + length
+            + " are present in the picked folder; re-copy the game folder from the PC and pick it again.";
+    }
+
     private void copyDocumentTree(DocumentFile sourceDoc, File targetDir, String relativePrefix) throws IOException {
         if (!targetDir.exists()) {
             targetDir.mkdirs();
@@ -803,7 +863,15 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
                 removeCaseTwins(targetDir, file.getName());
                 // Already there with the same size: skip the copy but count it toward
                 // progress, so re-selecting the same folder (or resuming) is nearly free.
+                // Same size is not proof the file is whole, though: a picked folder whose
+                // own copy is short produces a short target of exactly the source's size,
+                // which this skip would bless forever. A container whose header claims
+                // more than the file holds fails loudly instead of being skipped.
                 if (targetFile.exists() && targetFile.length() == expected) {
+                    String truncation = ilffTruncationError(targetFile, relative);
+                    if (truncation != null) {
+                        throw new IOException("Incomplete file in the picked folder: " + truncation);
+                    }
                     copyDoneBytes += expected;
                     reportCopyProgress();
                     continue;
@@ -835,6 +903,15 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
                 if (written != expected) {
                     tmpFile.delete();
                     throw new IOException("Short copy of " + relative + ": got " + written + " of " + expected + " bytes");
+                }
+                // The delivered bytes matching the source's claimed size only proves the
+                // copy was faithful -- not that the source itself is whole. A container
+                // whose own header claims more than was delivered is a short source
+                // file, and installing it would crash the game on load.
+                String truncation = ilffTruncationError(tmpFile, relative);
+                if (truncation != null) {
+                    tmpFile.delete();
+                    throw new IOException("Incomplete file in the picked folder: " + truncation);
                 }
                 if (!tmpFile.renameTo(targetFile)) {
                     tmpFile.delete();
