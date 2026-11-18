@@ -23,14 +23,17 @@ namespace ProjectIGI.Presentation.Igi2.Menus;
 /// </list>
 /// </para>
 /// <para>
-/// What does not map, and why it is left as a record-only option: model detail is read at level
-/// load, so it takes effect on the next mission, not this one; high-quality forests and lens
-/// flares are read live straight out of the record, so they need no push; stencil shadows need
-/// the deferred/HDR frame path Android Vanilla never builds; texture compression, wind on
-/// forests, bullet hit effects and water quality have no reader anywhere; gamma is only read in
-/// the Resolve pass Vanilla never runs; force software vertex processing is a retail renderer
-/// choice with no equivalent here. Those stay stored in the record and the profile, and the PR
-/// body says so, rather than being dressed up as working.
+/// What does not map to a renderer variable is mirrored instead, into
+/// <see cref="Igi2RetailCVars"/>: model detail is read at level load out of the record, so the
+/// seeded record is what makes it take effect on the next mission; high-quality forests and lens
+/// flares are read live straight out of the record, so they need no push beyond the seeding;
+/// stencil shadows need the deferred/HDR frame path Android Vanilla never builds; texture
+/// compression, wind on forests, bullet hit effects and water quality have no reader anywhere;
+/// gamma is only read in the Resolve pass Vanilla never runs, and the profile's gamma is
+/// retail's own number rather than the resolve's, so it is mirrored as itself and never mapped
+/// onto <c>r_gamma</c>; force software vertex processing is a retail renderer choice with no
+/// equivalent here. The mirrored options are remembered across relaunches like the mapped ones;
+/// the ones with no reader still do nothing visible, and are dressed up as nothing else.
 /// </para>
 /// <para>
 /// The record is seeded from the live stores when the menus start (<see
@@ -88,6 +91,32 @@ public static class Igi2GraphicsApplier
         };
 
         GeometryCVars.TerrainDetail.Value = (int)Math.Round(96f + Math.Clamp(gfx.TerrainDetail, 0f, 1f) * 67f);
+
+        // The rest of the record and the profile's own graphics fields have no renderer
+        // variable to land on, so they are mirrored into the retail variables instead:
+        // without this they lived only in the record, which the next launch re-reads
+        // from the retail file, and every one of these choices was forgotten. The
+        // mirror is written here, beside the mappings, so the settings.cfg write the
+        // OK button runs next carries them with the rest.
+        Igi2RetailCVars.ModelDetail.Value = gfx.ModelDetail;
+        Igi2RetailCVars.StencilShadows.Value = gfx.StencilShadows;
+        Igi2RetailCVars.TextureCompression.Value = gfx.TextureCompression;
+        Igi2RetailCVars.HighQualityForests.Value = gfx.HighQualityForests;
+        Igi2RetailCVars.WindOnForests.Value = gfx.WindOnForests;
+        Igi2RetailCVars.LensFlares.Value = gfx.LensFlares;
+        Igi2RetailCVars.BulletHitEffects.Value = gfx.BulletHitEffects;
+        Igi2RetailCVars.WaterQuality.Value = gfx.WaterQuality;
+
+        if (config.Active is { } activeProfile)
+        {
+            Igi2RetailCVars.Gamma.Value = activeProfile.Gamma;
+            Igi2RetailCVars.CrossHairAlpha.Value = activeProfile.CrossHairAlpha;
+            Igi2RetailCVars.ThickCrossHair.Value = activeProfile.ThickCrossHair;
+            Igi2RetailCVars.CrossHairColourR.Value = activeProfile.CrossHairColour.R;
+            Igi2RetailCVars.CrossHairColourG.Value = activeProfile.CrossHairColour.G;
+            Igi2RetailCVars.CrossHairColourB.Value = activeProfile.CrossHairColour.B;
+            Igi2RetailCVars.ForceSoftwareVertexProcessing.Value = activeProfile.ForceSoftwareVertexProcessing;
+        }
     }
 
     /// <summary>Seeds the options in force from the live stores, so the menu shows what the game is using.</summary>
@@ -123,6 +152,31 @@ public static class Igi2GraphicsApplier
             profile.TextureFilteringMode = MaterialCVars.PointMips.Value
                 ? 0
                 : MaterialCVars.Anisotropy.Value >= 2 ? 2 : 1;
+        }
+
+        // The mirrored options, seeded back out of their variables the same way: the
+        // record the retail file gave this launch holds the retail defaults, and the
+        // variables hold what the player last chose. Seeded before the detail level
+        // is recomputed, so the level reads the restored fields, not the file's.
+        config.Gfx.ModelDetail = Igi2RetailCVars.ModelDetail.Value;
+        config.Gfx.StencilShadows = Igi2RetailCVars.StencilShadows.Value;
+        config.Gfx.TextureCompression = Igi2RetailCVars.TextureCompression.Value;
+        config.Gfx.HighQualityForests = Igi2RetailCVars.HighQualityForests.Value;
+        config.Gfx.WindOnForests = Igi2RetailCVars.WindOnForests.Value;
+        config.Gfx.LensFlares = Igi2RetailCVars.LensFlares.Value;
+        config.Gfx.BulletHitEffects = Igi2RetailCVars.BulletHitEffects.Value;
+        config.Gfx.WaterQuality = Igi2RetailCVars.WaterQuality.Value;
+
+        if (config.Active is { } seededProfile)
+        {
+            seededProfile.Gamma = Igi2RetailCVars.Gamma.Value;
+            seededProfile.CrossHairAlpha = Igi2RetailCVars.CrossHairAlpha.Value;
+            seededProfile.ThickCrossHair = Igi2RetailCVars.ThickCrossHair.Value;
+            seededProfile.CrossHairColour = (
+                Igi2RetailCVars.CrossHairColourR.Value,
+                Igi2RetailCVars.CrossHairColourG.Value,
+                Igi2RetailCVars.CrossHairColourB.Value);
+            seededProfile.ForceSoftwareVertexProcessing = Igi2RetailCVars.ForceSoftwareVertexProcessing.Value;
         }
 
         config.GfxDetailLevel = Igi2GfxDetail.LevelFor(config.Gfx);
