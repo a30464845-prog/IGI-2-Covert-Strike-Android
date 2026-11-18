@@ -14,13 +14,13 @@ namespace ProjectIGI.Host.Configuration;
 /// </remarks>
 public enum HardwareTier
 {
-    /// <summary>Low-end mobile GPUs: 540p, low textures, near view distance, dynamic resolution on.</summary>
+    /// <summary>Low-end mobile GPUs: 540p, low textures, near view distance.</summary>
     Low,
 
-    /// <summary>Anything unrecognised, and the middle of the range: 720p, medium textures, far view distance, dynamic resolution on.</summary>
+    /// <summary>Anything unrecognised, and the middle of the range: 720p, medium textures, far view distance.</summary>
     Medium,
 
-    /// <summary>Flagship mobile GPUs: 900p, high textures, far view distance, dynamic resolution off.</summary>
+    /// <summary>Flagship mobile GPUs: 900p, high textures, far view distance.</summary>
     High,
 }
 
@@ -36,8 +36,6 @@ public static class HardwareTiering
         int RenderScaleHeight,
         int TextureQuality,
         float ViewDistance,
-        bool DynamicResolution,
-        int DynamicTargetFps,
         int FrameLimit);
 
     // The per-tier starting values. RenderScaleMode is the Android window tier (0 = 540p,
@@ -54,24 +52,18 @@ public static class HardwareTiering
                 RenderScaleHeight: 540,
                 TextureQuality: 0,
                 ViewDistance: 0.025f,
-                DynamicResolution: true,
-                DynamicTargetFps: 30,
                 FrameLimit: 0),
             [HardwareTier.Medium] = new(
                 RenderScaleMode: 1,
                 RenderScaleHeight: 720,
                 TextureQuality: 1,
                 ViewDistance: 1.0f,
-                DynamicResolution: true,
-                DynamicTargetFps: 30,
                 FrameLimit: 0),
             [HardwareTier.High] = new(
                 RenderScaleMode: 2,
                 RenderScaleHeight: 900,
                 TextureQuality: 2,
                 ViewDistance: 1.0f,
-                DynamicResolution: false,
-                DynamicTargetFps: 30,
                 FrameLimit: 0),
         };
 
@@ -123,7 +115,7 @@ public static class HardwareTiering
         return HardwareTier.Medium;
     }
 
-    /// <summary>Renders a tier as the one-line summary the start-up log shows, for example "540p, textures low, view distance near, dynamic resolution 30 fps".</summary>
+    /// <summary>Renders a tier as the one-line summary the start-up log shows, for example "540p, textures low, view distance near".</summary>
     public static string Describe(HardwareTier tier)
     {
         TierValues values = Table[tier];
@@ -134,10 +126,7 @@ public static class HardwareTiering
             _ => "medium",
         };
         string viewDistance = values.ViewDistance <= 0.025f ? "near" : "far";
-        string dynamic = values.DynamicResolution
-            ? $"dynamic resolution {values.DynamicTargetFps} fps"
-            : "dynamic resolution off";
-        return $"{values.RenderScaleHeight}p, textures {textures}, view distance {viewDistance}, {dynamic}";
+        return $"{values.RenderScaleHeight}p, textures {textures}, view distance {viewDistance}";
     }
 
     /// <summary>Applies a tier's starting values to the render CVars.</summary>
@@ -179,16 +168,6 @@ public static class HardwareTiering
             ReconstructionCVars.FrameLimit.Value = values.FrameLimit;
         }
 
-        if (ReconstructionCVars.DynamicResolution.IsDefault)
-        {
-            ReconstructionCVars.DynamicResolution.Value = values.DynamicResolution;
-        }
-
-        if (ReconstructionCVars.DynamicTargetFps.IsDefault)
-        {
-            ReconstructionCVars.DynamicTargetFps.Value = values.DynamicTargetFps;
-        }
-
         if (ReconstructionCVars.ViewDistance.IsDefault)
         {
             ReconstructionCVars.ViewDistance.Value = values.ViewDistance;
@@ -206,26 +185,24 @@ public static class HardwareTiering
     /// <remarks>
     /// Unlike <see cref="Apply"/>, this ignores the <c>IsDefault</c> guards: a re-run from the cheats
     /// menu measures tiers over settings the player already has, where every CVar is non-default and
-    /// <see cref="Apply"/> would change nothing. Dynamic resolution is forced off while measuring --
-    /// the ladder would otherwise move the scale under the measurement and every tier would read the
-    /// same held frame rate -- and the frame limit is the tier's own, which is uncapped on every tier.
+    /// <see cref="Apply"/> would change nothing. The frame limit is the tier's own, which is uncapped
+    /// on every tier.
     /// </remarks>
     public static void ApplyForMeasurement(HardwareTier tier, IGameWindow window) =>
-        ApplyValues(tier, window, dynamicResolution: false);
+        ApplyValues(tier, window);
 
-    /// <summary>Applies a tier's values unconditionally, with the tier's own dynamic-resolution setting.</summary>
+    /// <summary>Applies a tier's values unconditionally, as the benchmark's finish step.</summary>
     /// <param name="tier">The tier the benchmark picked.</param>
     /// <param name="window">The window, for its height and its render-scale tier.</param>
     /// <remarks>
-    /// The benchmark's finish step: the winning tier as the player will actually play it, dynamic
-    /// resolution included (on for Low and Medium, off for High). Like
+    /// The benchmark's finish step: the winning tier as the player will actually play it. Like
     /// <see cref="ApplyForMeasurement"/>, this ignores the <c>IsDefault</c> guards -- the choice is
     /// the benchmark's to make, not the defaults' to keep.
     /// </remarks>
     public static void ApplyChoice(HardwareTier tier, IGameWindow window) =>
-        ApplyValues(tier, window, dynamicResolution: Table[tier].DynamicResolution);
+        ApplyValues(tier, window);
 
-    private static void ApplyValues(HardwareTier tier, IGameWindow window, bool dynamicResolution)
+    private static void ApplyValues(HardwareTier tier, IGameWindow window)
     {
         ArgumentNullException.ThrowIfNull(window);
 
@@ -236,8 +213,6 @@ public static class HardwareTiering
         window.RenderScaleMode = values.RenderScaleMode;
         ReconstructionCVars.RenderScale.Value = scale;
         ReconstructionCVars.FrameLimit.Value = values.FrameLimit;
-        ReconstructionCVars.DynamicResolution.Value = dynamicResolution;
-        ReconstructionCVars.DynamicTargetFps.Value = values.DynamicTargetFps;
         ReconstructionCVars.ViewDistance.Value = values.ViewDistance;
         MaterialCVars.TextureQuality.Value = values.TextureQuality;
     }
