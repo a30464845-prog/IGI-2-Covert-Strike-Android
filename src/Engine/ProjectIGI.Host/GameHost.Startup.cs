@@ -63,13 +63,13 @@ public sealed partial class GameHost
             _options.FirstRunPreset,
             _options.LockedPreset);
 
-        // The same shape, for motion blur, sun shadows, the render scale and dynamic resolution:
-        // the saved r_motion_blur, r_shadows, r_scale and r_dynamic_resolution are only in force
+        // The same shape, for motion blur, sun shadows and the render scale:
+        // the saved r_motion_blur, r_shadows and r_scale are only in force
         // once the console has read settings.cfg, and the Vanilla preset holds r_hdr and
         // r_deferred at 0 on a fresh install. The two capture flags cannot carry the choice across a
         // restart themselves — both default to 1, so the settings file, which only records differences
-        // from the default, never writes them — so they are re-derived from the blur, the shadows,
-        // the scale and dynamic resolution here, and kept in step with them by the subscriptions
+        // from the default, never writes them — so they are re-derived from the blur, the shadows and
+        // the scale here, and kept in step with them by the subscriptions
         // in BindDeviceVariables.
         ApplyCapturePath();
 
@@ -145,18 +145,16 @@ public sealed partial class GameHost
         _device.SetStageTiming(FrameCVars.PerformanceLog.Value);
         WhenChanged(FrameCVars.PerformanceLog, () => _device.SetStageTiming(FrameCVars.PerformanceLog.Value));
 
-        // The blur, the shadows, a sub-native render scale and dynamic resolution share the
+        // The blur, the shadows and a sub-native render scale share the
         // offscreen path: any one of them needing it opens the capture the resolve reads from, none
-        // of them closes it again, so the Motion Blur row, the Resolution Quality row and the
-        // Dynamic Resolution row in Settings are never dead controls and the direct path is
-        // untouched while all of them are off. One function derives the flags from all four
-        // settings, so the subscriptions cannot switch the path off under each other. The startup
-        // value is settled in SetUpConsole, after the settings file has been read; this keeps it
-        // live after that.
+        // of them closes it again, so the Motion Blur row and the Resolution Quality row in Settings
+        // are never dead controls and the direct path is untouched while all of them are off. One
+        // function derives the flags from all three settings, so the subscriptions cannot switch the
+        // path off under each other. The startup value is settled in SetUpConsole, after the settings
+        // file has been read; this keeps it live after that.
         WhenChanged(PostCVars.MotionBlur, ApplyCapturePath);
         WhenChanged(ShadowCVars.Shadows, ApplyCapturePath);
         WhenChanged(ReconstructionCVars.RenderScale, ApplyCapturePath);
-        WhenChanged(ReconstructionCVars.DynamicResolution, ApplyCapturePath);
 
         _flowHost = new HostFlowHost(_logger);
     }

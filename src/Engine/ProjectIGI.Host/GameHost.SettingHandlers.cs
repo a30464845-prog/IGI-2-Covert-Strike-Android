@@ -27,7 +27,7 @@ public sealed partial class GameHost
     // player's own choice and is left alone.
     private static bool _capturePathPromotedHybrid;
 
-    /// <summary>Opens the offscreen path exactly while something needs it — motion blur, sun shadows, a sub-native render scale or dynamic resolution — and closes it when none of them do.</summary>
+    /// <summary>Opens the offscreen path exactly while something needs it — motion blur, sun shadows or a sub-native render scale — and closes it when none of them do.</summary>
     /// <remarks>
     /// The blur is the only effect that used to need the capture: the Vanilla preset holds r_hdr and
     /// r_deferred at 0, so the frame is drawn straight to the back buffer and the resolve — blur and
@@ -41,14 +41,12 @@ public sealed partial class GameHost
     /// is open, and the shadow term is sampled only by the deferred shading pass.
     /// </para>
     /// <para>
-    /// A render scale below native is the third thing that needs the capture, and dynamic resolution
-    /// the fourth: the direct path draws straight to the back buffer at the window's size, so without
-    /// the capture the Resolution Quality tier — and the retail Resolution list, which sets the same
-    /// scale — change nothing the player can see. The dynamic ladder only moves the effective scale, which the direct path never reads,
-    /// so with the path closed the ladder is dead too. Neither promotes the lighting model or turns
-    /// on the real-time structures: the capture opens with the lighting the player already has. The
-    /// manual tier stays the ceiling — the ladder never renders above it — and the archived render
-    /// scale is never written by either.
+    /// A render scale below native is the third thing that needs the capture: the direct path draws
+    /// straight to the back buffer at the window's size, so without the capture the Resolution
+    /// Quality tier — and the retail Resolution list, which sets the same scale — change nothing
+    /// the player can see. It promotes neither the lighting model nor the real-time structures:
+    /// the capture opens with the lighting the player already has, and the archived render scale
+    /// is never written.
     /// </para>
     /// <para>
     /// Shadows also promote the lighting model to hybrid while they are on, and back to baked when they
@@ -76,11 +74,10 @@ public sealed partial class GameHost
         bool shadowsOn = ShadowCVars.Shadows.StoredValue > 0;
         bool effectsOn = shadowsOn || PostCVars.MotionBlur.Value > 0f;
 
-        // A sub-native render scale, or dynamic resolution on: both need the capture for the
-        // reasons the remarks give. Read through StoredValue, as the shadows read is: no override
-        // holds either today, and the stored choice is the player's own either way.
-        bool scaleNeedsCapture = ReconstructionCVars.RenderScale.StoredValue < 1f
-            || ReconstructionCVars.DynamicResolution.StoredValue;
+        // A sub-native render scale needs the capture for the reason the remarks give. Read
+        // through StoredValue, as the shadows read is: no override holds it today, and the stored
+        // choice is the player's own either way.
+        bool scaleNeedsCapture = ReconstructionCVars.RenderScale.StoredValue < 1f;
         bool on = effectsOn || scaleNeedsCapture;
         FrameCVars.OffscreenScene.Value = on;
         LightingCVars.Deferred.Value = on;

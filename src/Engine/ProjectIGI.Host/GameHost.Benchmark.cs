@@ -32,8 +32,7 @@ public sealed partial class GameHost
     // (rain through the storm renderer, snow through the snow renderer, whichever the level
     // authors). What moves is the camera, and what is measured is the frame rate of that picture
     // under each tier. A firefight can still cost more than this scene -- the 30 FPS bar is on the
-    // 1% low, and Low keeps dynamic resolution on, so real play has its own ladder back towards
-    // the target.
+    // 1% low, so a tier that stutters under load does not pass on its mean.
     //
     // What the player sees: the menu hides for the run and the level fills the screen, the camera
     // circling the station's spawn point once every ~25 seconds; a heads-up display shows the live
@@ -98,8 +97,6 @@ public sealed partial class GameHost
         int RenderScaleMode,
         int TextureQuality,
         float ViewDistance,
-        bool DynamicResolution,
-        int DynamicTargetFps,
         int FrameLimit,
         bool VSync);
 
@@ -108,8 +105,8 @@ public sealed partial class GameHost
     // its way down to Low.
     private static readonly HardwareTier[] BenchmarkTierOrder = [HardwareTier.High, HardwareTier.Medium, HardwareTier.Low];
 
-    // The bar: the 1% low -- the frame rate the worst hundredth of frames sustains -- at the
-    // dynamic-resolution target, 30 FPS. A mean would let a tier that stutters every second pass;
+    // The bar: the 1% low -- the frame rate the worst hundredth of frames sustains -- at
+    // 30 FPS. A mean would let a tier that stutters every second pass;
     // the 1% low is the rate the player actually feels.
     private const double BenchmarkPassOnePercentLowFps = 30.0;
 
@@ -272,8 +269,6 @@ public sealed partial class GameHost
             _window.RenderScaleMode,
             MaterialCVars.TextureQuality.Value,
             ReconstructionCVars.ViewDistance.Value,
-            ReconstructionCVars.DynamicResolution.Value,
-            ReconstructionCVars.DynamicTargetFps.Value,
             ReconstructionCVars.FrameLimit.Value,
             FrameCVars.VSync.Value);
         _benchmarkManual = manual;
@@ -297,9 +292,9 @@ public sealed partial class GameHost
         state.Console.SaveSettings();
 
         // The measurement reads the picture, so nothing may cap it or move under it: vertical
-        // sync off, dynamic resolution off (per tier, at apply time), and the backdrop's lite
-        // profile off so the menu level renders with the full preset -- the same picture a
-        // mission renders -- rather than without its shadows, traces and gathers. The lite
+        // sync off, and the backdrop's lite profile off so the menu level renders with the full
+        // preset -- the same picture a mission renders -- rather than without its shadows,
+        // traces and gathers. The lite
         // switch is not archived, so the override below leaves no trace; the profile is
         // re-applied right after it is cleared.
         FrameCVars.VSync.Value = false;
@@ -607,7 +602,7 @@ public sealed partial class GameHost
         _benchmarkPhase = BenchmarkPhase.WarmUp;
         _benchmarkPhaseStartedMs = now;
         state.FramePerformance.Reset();
-        _logger.Information("Benchmark", $"Measuring {tier}: {HardwareTiering.Describe(tier)}, dynamic resolution off.");
+        _logger.Information("Benchmark", $"Measuring {tier}: {HardwareTiering.Describe(tier)}.");
     }
 
     private void FinishBenchmarkTier(FrameLoopState state, int now)
@@ -630,8 +625,7 @@ public sealed partial class GameHost
         _benchmarkTierIndex++;
         if (_benchmarkTierIndex >= BenchmarkTierOrder.Length)
         {
-            // Nothing held 30 FPS: Low is the floor, and its dynamic resolution -- on for Low --
-            // is what lifts real play back towards the target from there.
+            // Nothing held 30 FPS: Low is the floor.
             EnterBenchmarkResults(state, HardwareTier.Low);
             return;
         }
@@ -714,8 +708,6 @@ public sealed partial class GameHost
         _window.RenderScaleMode = snapshot.RenderScaleMode;
         ReconstructionCVars.RenderScale.Value = snapshot.RenderScale;
         ReconstructionCVars.FrameLimit.Value = snapshot.FrameLimit;
-        ReconstructionCVars.DynamicResolution.Value = snapshot.DynamicResolution;
-        ReconstructionCVars.DynamicTargetFps.Value = snapshot.DynamicTargetFps;
         ReconstructionCVars.ViewDistance.Value = snapshot.ViewDistance;
         MaterialCVars.TextureQuality.Value = snapshot.TextureQuality;
     }

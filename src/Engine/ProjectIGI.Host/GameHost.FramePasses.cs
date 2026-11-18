@@ -575,25 +575,6 @@ public sealed partial class GameHost
         // measures is drawn below, in this same pass.
         UpdateBenchmark(state);
 
-        // Dynamic resolution: once per presented frame, in a mission only, feed the frame's wall
-        // time to the ladder. Menus, the pause menu and the warm-up are not the game running, and
-        // their frame times say nothing about what the mission costs; a benchmark is a measurement,
-        // not a game, and the ladder would move under it.
-        if (!_options.IsBenchmark
-            && _session.Mission is not null
-            && !_menuFlow.MenuMode
-            && !_menuFlow.PauseMenu
-            && !IsWarmingUp
-            && ReconstructionCVars.DynamicResolution.Value)
-        {
-            _dynamicResolution.Evaluate(
-                Stopwatch.GetTimestamp(),
-                ReconstructionCVars.RenderScale.Value,
-                ReconstructionCVars.DynamicTargetFps.Value,
-                ReconstructionCVars.FrameLimit.Value,
-                FrameCVars.SmoothPresentation.Value);
-        }
-
         if (_scene is not null && _world is not null && _camera is not null)
         {
             RenderWorld(state, state.Console);
