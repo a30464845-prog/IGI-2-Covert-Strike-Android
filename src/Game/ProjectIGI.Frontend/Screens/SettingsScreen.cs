@@ -881,6 +881,15 @@ public sealed class SettingsScreen : ShellScreen
         {
             Context.Stack.Reset(new PauseScreen(Context));
         }
+        else if (Context.SettingsFromRetailMenu)
+        {
+            // Opened from the retail main menu, not from the shell's own main menu:
+            // the player never saw the shell's landing page, so going back means the
+            // shell is put away and the retail menu is on screen again.
+            Context.SettingsFromRetailMenu = false;
+            Context.Stack.Reset(new MainMenuScreen(Context));
+            Context.Host.ReturnToRetailMenu();
+        }
         else
         {
             Context.Stack.Reset(new MainMenuScreen(Context));

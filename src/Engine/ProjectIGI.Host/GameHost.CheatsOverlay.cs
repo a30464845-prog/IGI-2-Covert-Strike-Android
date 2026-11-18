@@ -82,14 +82,38 @@ public sealed partial class GameHost
                 input.Mouse.SetButton(MouseButton.Left, down: false);
             }
 
-            // Keyboard icon just under the gear: taps toggle the soft keyboard so the
-            // player can type names and other menu text even when the automatic
+            // Settings icon just under the gear: taps open the pause menu's
+            // configuration screen over the retail menu, so settings can be changed
+            // before a mission starts. Same generous hit area as the gear. (The icon
+            // is 28 units, centred on the gear; see DrawCheatsOverlay.)
+            float stW = 28f * scale;
+            float stH = 28f * scale;
+            float stX = gearX + ((gearW - stW) * 0.5f);
+            float stY = gearY + gearH + (8f * scale);
+            float stHitX = stX + (stW * 0.5f) - (hit * 0.5f);
+            float stHitY = stY + (stH * 0.5f) - (hit * 0.5f);
+            if (click && clickX >= stHitX && clickX <= stHitX + hit && clickY >= stHitY && clickY <= stHitY + hit)
+            {
+                if (state.Shell is { } shell)
+                {
+                    // Menu mode is what lets the shell update and draw over the retail
+                    // menu; the retail menu's own tasks see idle input while it is set
+                    // (UpdateShell marks the frame captured), so the menu underneath
+                    // cannot react to taps on the settings.
+                    shell.OpenSettingsFromMainMenu();
+                    _menuFlow.MenuMode = true;
+                    input.Mouse.SetButton(MouseButton.Left, down: false);
+                }
+            }
+
+            // Keyboard icon just under the settings icon: taps toggle the soft keyboard
+            // so the player can type names and other menu text even when the automatic
             // focus detection does not fire. Same generous hit area as the gear.
             // (The icon is 28 units, centred on the gear; see DrawCheatsOverlay.)
             float kbW = 28f * scale;
             float kbH = 28f * scale;
             float kbX = gearX + ((gearW - kbW) * 0.5f);
-            float kbY = gearY + gearH + (8f * scale);
+            float kbY = stY + stH + (8f * scale);
             float kbHitX = kbX + (kbW * 0.5f) - (hit * 0.5f);
             float kbHitY = kbY + (kbH * 0.5f) - (hit * 0.5f);
             if (click && clickX >= kbHitX && clickX <= kbHitX + hit && clickY >= kbHitY && clickY <= kbHitY + hit)
@@ -251,7 +275,29 @@ public sealed partial class GameHost
         painter.FillRect(new UiRect(gCenterX - gRadius, gCenterY - gRadius, gRadius * 2f, gRadius * 2f), brightGreen);
         painter.FillRect(new UiRect(gCenterX - (gRadius * 0.4f), gCenterY - (gRadius * 0.4f), gRadius * 0.8f, gRadius * 0.8f), darkBg);
 
-        // ── 1b. Keyboard icon just under the gear ────────────────────────────
+        // ── 1b. Settings icon just under the gear ───────────────────────────
+        // Three slider tracks with a knob on each: the settings glyph, in the same
+        // 28-unit box as the gear. Tapping it opens the configuration
+        // screen over the retail menu (see UpdateCheatsOverlay).
+        float stW = 28f * scale;
+        float stH = 28f * scale;
+        float stX = gearX + ((gearW - stW) * 0.5f);
+        float stY = gearY + gearH + (8f * scale);
+        painter.FillRect(new UiRect(stX, stY, stW, stH), Bgra32.FromRgba(18, 32, 60, 245));
+        painter.StrokeRect(new UiRect(stX, stY, stW, stH), 2f * scale, brightGreen);
+        float trackX = stX + (5f * scale);
+        float trackW = 18f * scale;
+        float trackH = 2f * scale;
+        float knob = 5f * scale;
+        float[] trackY = [stY + (7f * scale), stY + (13f * scale), stY + (19f * scale)];
+        float[] knobX = [stX + (8f * scale), stX + (15f * scale), stX + (11f * scale)];
+        for (int i = 0; i < 3; i++)
+        {
+            painter.FillRect(new UiRect(trackX, trackY[i], trackW, trackH), brightGreen);
+            painter.FillRect(new UiRect(knobX[i], trackY[i] - (1.5f * scale), knob, knob), brightGreen);
+        }
+
+        // ── 1c. Keyboard icon just under the settings icon ───────────────────
         // Tapping it toggles the soft keyboard so player names and other menu text
         // can be typed even when the automatic focus detection does not fire.
         // It is drawn highlighted while the keyboard is requested. It is deliberately
@@ -260,7 +306,7 @@ public sealed partial class GameHost
         float kbW = 28f * scale;
         float kbH = 28f * scale;
         float kbX = gearX + ((gearW - kbW) * 0.5f);
-        float kbY = gearY + gearH + (8f * scale);
+        float kbY = stY + stH + (8f * scale);
         painter.FillRect(new UiRect(kbX, kbY, kbW, kbH), KeyboardRequested ? brightGreen : Bgra32.FromRgba(18, 32, 60, 245));
         painter.StrokeRect(new UiRect(kbX, kbY, kbW, kbH), 2f * scale, brightGreen);
         // Two rows of keys and a spacebar. Dark keys when highlighted, bright green otherwise.
