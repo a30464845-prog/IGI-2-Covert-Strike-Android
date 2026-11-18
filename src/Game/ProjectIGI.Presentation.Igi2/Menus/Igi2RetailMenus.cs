@@ -27,6 +27,7 @@ internal sealed class Igi2RetailMenus : IRetailMenus
     private readonly RetailMenuHost _shell;
     private readonly MenuSystem _menu;
     private readonly SpriteResource? _missionSelectBackground;
+    private readonly Igi2GameConfig _config;
 
     /// <summary>Initializes a new instance of the <see cref="Igi2RetailMenus"/> class, and starts the menu script.</summary>
     /// <param name="request">What the menus are started with.</param>
@@ -115,6 +116,7 @@ internal sealed class Igi2RetailMenus : IRetailMenus
         Igi2GameConfig config = services is not null && services.TryGet(out Igi2GameConfig? foundConfig)
             ? foundConfig
             : new Igi2GameConfig();
+        _config = config;
         Igi2SaveSession? saves = services is not null && services.TryGet(out Igi2SaveSession? foundSaves)
             ? foundSaves
             : null;
@@ -278,6 +280,16 @@ internal sealed class Igi2RetailMenus : IRetailMenus
 
     /// <inheritdoc/>
     public void CloseScreens() => _shell.CloseScreens();
+
+    /// <inheritdoc/>
+    public bool Suppressed
+    {
+        get => _shell.Suppressed;
+        set => _shell.Suppressed = value;
+    }
+
+    /// <inheritdoc/>
+    public void SyncGraphicsFromLive() => Igi2GraphicsApplier.SyncFromLive(_config);
 
     /// <inheritdoc/>
     public void RunAction(string expression) => _menu.Manager.RunAction(expression);

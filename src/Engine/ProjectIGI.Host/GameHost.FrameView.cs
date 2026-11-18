@@ -500,7 +500,9 @@ public sealed partial class GameHost
         // scene would otherwise have used is the player's own, and orbiting away from where they
         // were standing is the one thing a pause must not do. The showcase camera outlives the menu
         // it was built for -- starting a mission does not clear it -- so this has to say so.
-        if (_menuFlow.OverShowcase && _showcaseCamera is not null)
+        // A benchmark run takes the same orbit over the retail menu too: its drone camera is
+        // the showcase camera for the run, and OverShowcase is never true on the retail path.
+        if ((_menuFlow.OverShowcase || BenchmarkRunning) && _showcaseCamera is not null)
         {
             int menuCameraNow = _loop.TimeSource.Milliseconds;
             float menuCameraElapsed = Math.Clamp((menuCameraNow - state.LastMenuCameraMilliseconds) / 1000f, 0f, 0.1f);

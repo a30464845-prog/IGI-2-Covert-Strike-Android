@@ -68,6 +68,22 @@ public interface IRetailMenus : IDisposable
     /// <summary>Stops drawing the screens and frees what they were drawn with, as a mission takes the frame.</summary>
     void CloseScreens();
 
+    /// <summary>Gets or sets whether the menus are suppressed: drawing nothing and reading no input, while a host overlay owns the frame.</summary>
+    /// <remarks>
+    /// The menu script keeps running underneath; unsuppressing shows the same screen it left.
+    /// The benchmark's first-run prompt and run set this so their buttons cannot also fire a
+    /// menu entry under them. Input read while suppressed is consumed and discarded, so no
+    /// press queued during the suppression fires afterwards.
+    /// </remarks>
+    bool Suppressed { get; set; }
+
+    /// <summary>Seeds the retail graphics record from the live stores, so the Graphics screen shows what the game is using.</summary>
+    /// <remarks>
+    /// For a host-side change the menus did not make: the benchmark's decided tier, applied
+    /// straight to the live stores. A title with no graphics record to re-seed does nothing.
+    /// </remarks>
+    void SyncGraphicsFromLive();
+
     /// <summary>Gets the id of the menu screen currently showing, as the script numbers it.</summary>
     int ActiveMenuScreen { get; }
 

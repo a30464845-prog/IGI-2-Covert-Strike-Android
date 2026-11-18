@@ -695,11 +695,11 @@ public sealed partial class GameHost : IDisposable
                     + $"r_dynamic_target_fps={ReconstructionCVars.DynamicTargetFps.Value}.");
         }
 
-        // The first-run benchmark: the same gate as the tier above -- no settings file was
-        // loaded, and the run has never finished or been skipped -- so an existing install
-        // never sees it. It only arms here; the run itself starts on the first menu frame,
-        // once the showcase level it measures is up (see GameHost.Benchmark).
-        ArmFirstRunBenchmark(state.Console.SettingsLoaded);
+        // The first-run benchmark prompt: armed unless the player dismissed it for good, so
+        // an install that answered "Yes" asks again on a later launch. It only arms here;
+        // the prompt itself shows on the first menu frame, and the run follows the answer
+        // (see GameHost.Benchmark).
+        ArmFirstRunBenchmark();
 
         CreateClocksAndLighting(state);
 
@@ -827,11 +827,14 @@ public sealed partial class GameHost : IDisposable
             // reference captures depend on the one-to-one schedule.
             // The cinematic shell always renders uncapped so the menu is smooth whatever the render preset's
             // r_smooth is; the orbit and the tweens run on real time and want every frame the display offers.
+            // A benchmark run renders uncapped too: the latch would cap every tier at 30 Hz and the
+            // measurement could not tell them apart.
             // In game the original's one-render-per-tick latch is lifted only by smooth mode.
             // A -capturerate above the tick rate lifts it under lockstep too: its clock advances a fraction of a tick per
             // frame, so with the latch held no frame between two ticks could render and the clock -- counted in rendered
             // frames -- would never reach the next tick.
             _loop.Clock.UncappedRenders = _options.IsBenchmark
+                || BenchmarkRunning
                 || _menuFlow.MenuMode
                 || (!_options.Lockstep && FrameCVars.SmoothPresentation.Value)
                 || (_options.Lockstep && _options.CaptureRate > _loop.Clock.TickRate);

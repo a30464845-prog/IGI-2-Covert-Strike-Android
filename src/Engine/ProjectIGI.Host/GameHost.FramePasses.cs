@@ -205,13 +205,14 @@ public sealed partial class GameHost
         // heard taps would fire invisible buttons under the drone view. Everything else in this
         // block still runs -- the press queue is drained, the held-frame handover still fires --
         // so the run's own backdrop swap is unaffected; only the shell's reading of input stops.
+        // The first-run prompt is the same shape: its buttons own the taps until it is answered.
         if ((_menuFlow.MenuMode || loadGameOverlay) && state.Shell is not null)
         {
             int shellNow = _loop.TimeSource.Milliseconds;
             float shellElapsed = Math.Clamp((shellNow - state.LastShellMilliseconds) / 1000f, 0f, 0.1f);
             state.LastShellMilliseconds = shellNow;
 
-            if (!BenchmarkRunning)
+            if (!BenchmarkRunning && !_benchmarkPromptUp)
             {
                 var shellFrame = new LayoutContext(_window.Width, _window.Height);
                 state.Shell.Update(shellFrame, _window.Input, shellElapsed);
@@ -223,7 +224,7 @@ public sealed partial class GameHost
             if (LoadGameRequested)
             {
                 LoadGameRequested = false;
-                if (!_menuFlow.PauseMenu && _session.Mission is null && !BenchmarkRunning)
+                if (!_menuFlow.PauseMenu && _session.Mission is null && !BenchmarkRunning && !_benchmarkPromptUp)
                 {
                     state.Shell.Stack.Reset(new LoadGameScreen(state.Shell.Context), animate: false);
                     if (loadGameOverlay)
@@ -731,6 +732,9 @@ public sealed partial class GameHost
 
         // -- Benchmark Progress Bar -------------------------------------------------
         DrawBenchmarkOverlay(state);
+
+        // -- First-Run Benchmark Prompt --------------------------------------------
+        DrawBenchmarkPrompt(state);
     }
 
     /// <summary>Draws a small FPS counter overlay at the top right corner of the screen.</summary>

@@ -26,8 +26,9 @@ public sealed partial class GameHost
         }
 
         // While a benchmark is running the menu is hidden and the gear is not drawn; the modal
-        // cannot open under the drone view, and the keyboard toggle stays put too.
-        if (BenchmarkRunning)
+        // cannot open under the drone view, and the keyboard toggle stays put too. The
+        // first-run prompt is the same: its own buttons own the taps until it is answered.
+        if (BenchmarkRunning || _benchmarkPromptUp)
         {
             _cheatsModalOpen = false;
             return;
@@ -223,8 +224,9 @@ public sealed partial class GameHost
             return;
         }
 
-        // The gear and the keyboard icon stay off the drone view while a run is going.
-        if (BenchmarkRunning)
+        // The gear and the keyboard icon stay off the drone view while a run is going, and
+        // off the first-run prompt while it asks.
+        if (BenchmarkRunning || _benchmarkPromptUp)
         {
             return;
         }
