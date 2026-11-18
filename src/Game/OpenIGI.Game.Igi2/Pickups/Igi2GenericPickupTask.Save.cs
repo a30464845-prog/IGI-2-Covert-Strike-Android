@@ -1,0 +1,33 @@
+using OpenIGI.Game.Igi2.Saves;
+
+namespace OpenIGI.Game.Igi2.Pickups;
+
+/// <content>Its save state, <c>GenericPickup_ptSerializeParameterList</c>: a model object's, then whether it is taken, and its model.</content>
+public sealed partial class Igi2GenericPickupTask : ISavedState
+{
+    /// <inheritdoc/>
+    /// <remarks>
+    /// <c>GenericPickup_GetSerializeInfoHandler</c>: written against the nearest task above it with a level id, as retail's saves
+    /// have it (<c>Container/GenericPickup</c>, <c>Building/GenericPickup</c>).
+    /// </remarks>
+    public bool IsSavedWithParent => true;
+
+    /// <inheritdoc/>
+    public void WriteState(StateWriter writer)
+    {
+        ArgumentNullException.ThrowIfNull(writer);
+        Igi2ModelObjState.Write(writer, Position, EngineEuler.Rotation(Orientation.X, Orientation.Y, Orientation.Z), IsInWorld);
+        writer.Bool(_isPickedUp != 0);
+        writer.Text(Model);
+    }
+
+    /// <inheritdoc/>
+    /// <remarks>Its in-world byte comes back with it: one collected, or held out by its container, stays out.</remarks>
+    public void ReadState(StateReader reader)
+    {
+        ArgumentNullException.ThrowIfNull(reader);
+        IsInWorld = Igi2ModelObjState.Read(reader).IsInWorld;
+        _isPickedUp = reader.Bool() ? (byte)1 : (byte)0;
+        Model = reader.Text();
+    }
+}

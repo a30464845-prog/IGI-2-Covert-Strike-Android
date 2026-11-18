@@ -1,0 +1,639 @@
+using OpenIGI.Core.Collections;
+using OpenIGI.Core.Numerics;
+using OpenIGI.Engine.Tasks;
+using OpenIGI.Formats.Animation;
+using OpenIGI.Game.Ai;
+using OpenIGI.Game.Igi1.Player;
+using OpenIGI.Game.Player;
+using OpenIGI.Game.World;
+
+namespace OpenIGI.Game.Igi1.Ai;
+
+/// <summary>
+/// What the soldiers see with: the sight line's own rule, each soldier's eye as its palette holds it, the rays and rounds
+/// that rebuild those palettes, and the humans the detection scan is offered.
+/// </summary>
+/// <remarks>
+/// The eye a guard looks along is not its pose: it is the bone palette's eye entry, rebuilt only when the camera draws
+/// the soldier or a ray or round passes it (<c>0x45F240</c>). Everything that rebuilds it lives here, beside the casts
+/// that test what it then sees.
+/// </remarks>
+/// <param name="context">The soldiers and their brains.</param>
+/// <param name="scriptSound">Plays a definition a brain's script asks for, at a position.</param>
+internal sealed class SoldierSightQueries(SoldierContext context, Action<string, Vector3d, Func<Vector3d>?> scriptSound)
+{
+    /// <summary>The soldier model's <c>MESH+0x78</c> bound, <c>Human+160</c>, when the model's own is not to hand.</summary>
+    public const float DefaultHumanBoundMetres = 0.94f;
+
+    private const double SightSkipEpsilonUnits = LineCoverQuery.SightSkipEpsilonUnits;
+
+    private const int SightSkipLimit = LineCoverQuery.SightSkipLimit;
+
+    /// <summary>
+    /// Bone 5's offset from the origin (Human+32) in the palette a soldier is created with, in its body's frame: the eye
+    /// position of an undrawn guard, read off mission 4's level-start guards 421, 422 and 427 (placed at heading 0), whose
+    /// eyes stayed this far from their origins while the origins drifted with the idle clip.
+    /// </summary>
+    public static readonly Vector3f RestEyeOffset = new(-31.9f, 33.0f, 3502.6f);
+
+    /// <summary>
+    /// The gun's offset from the origin in the palette a soldier is created with, in its body's frame -- read off the same
+    /// guards (and 426, placed at 24 degrees, which turns back to it), whose guns rode their origins this far off.
+    /// </summary>
+    public static readonly Vector3f RestGunOffset = new(-228.9f, 872.8f, 1336.1f);
+
+    /// <summary>
+    /// Bone 5's rest orientation in the body's frame -- the eye matrix of an undrawn guard placed at heading 0, read
+    /// off every level-start guard of mission 1 by the probe (the cone test's snapshot, +24). One placed at another
+    /// heading looks along that heading times this (BindViewTracking).
+    /// </summary>
+    public static readonly Matrix3f RestEyeOrientation = new(
+        0.9956f, -0.0927f, 0.0076f,
+        0.0919f, 0.9926f, 0.0784f,
+        -0.0148f, -0.0774f, 0.9968f);
+
+    private readonly SoldierContext _context = context;
+
+    private readonly Action<string, Vector3d, Func<Vector3d>?> _scriptSound = scriptSound;
+
+    // One combat-target record per opposing soldier, created lazily as each is first engaged. The
+    // friendly-vs-guard gate fight needs a real enemy record to aim at and fight, not just the player:
+    // per-brain enemy selection swaps the default target onto one of these when an opposing soldier is
+    // nearer than any hostile player, so Harrison's team at the gate trades fire with the guards.
+    private readonly Dictionary<SoldierView, AiCombatTarget> _npcTargets = [];
+
+    // The record a soldier is known to the others by, made the first time one of them looks at it.
+    private static AiCombatTarget NewTarget(SoldierView view) => new($"Soldier{view.Soldier.Id}");
+
+    // What CandidatesFor hands back, refilled on every call; see there.
+    private readonly List<AiDetectionCandidate> _candidates = [];
+
+    // Each soldier as the scans refer to it, and the one list of references a soldier's offer is refilled into.
+    private readonly Dictionary<SoldierView, AiHumanSource> _sources = new(ReferenceEqualityComparer.Instance);
+    private readonly List<AiHumanReference> _references = [];
+
+    /// <summary>Gets or sets the world trace the level's sight lines are tested with, kept for the scenario runs.</summary>
+    public WorldTraceCast? SightTraceForTesting { get; set; }
+
+    /// <summary>Whether the eye can see a point along a plain cast, any contact blocking.</summary>
+    /// <remarks>
+    /// The binocular overlay's rule: the retail detector culls by sector/portal visibility, which
+    /// see-through surfaces do not bound. See <see cref="HasLineOfSight(WorldTraceCast, Vector3d, Vector3d, double, GameTask, Func{GameTask, bool})"/>.
+    /// </remarks>
+    public static bool HasLineOfSight(WorldRayCast cast, Vector3d from, Vector3d to)
+    {
+        ArgumentNullException.ThrowIfNull(cast);
+        return HasLineOfSight(
+            (in WorldTraceRequest request, out WorldTraceHit hit) =>
+            {
+                bool found = cast(request.Origin, request.End, out WorldRayHit plain);
+                hit = found
+                    ? WorldTraceHit.FromRayHit(request, plain, WorldTraceHitKind.StaticObject)
+                    : default;
+                return found;
+            },
+            from,
+            to,
+            minimumVisibility: double.Epsilon);
+    }
+
+    /// <summary>Whether the eye can see a point, treating glass and fences as non-occluding.</summary>
+    /// <param name="trace">The world trace.</param>
+    /// <param name="from">The eye.</param>
+    /// <param name="to">The point looked at.</param>
+    /// <param name="minimumVisibility">
+    /// How much of the line has to be left once every surface it crosses has taken its share, for the point to count as
+    /// seen: 0.79 for a soldier's sight (<c>0x489B20</c>), anything above nothing for the binoculars and the map
+    /// (<c>0x471B60</c>, <c>0x460280</c>).
+    /// </param>
+    /// <remarks>
+    /// <para>
+    /// A cast returns only its NEAREST contact, so a single probe would stop at a chain-link fence and
+    /// never notice a solid wall right behind it. This steps the ray past each see-through surface
+    /// (glass, wire) and keeps looking, so a guard behind a fence is seen but one behind the wall the
+    /// fence stands in front of is not.
+    /// </para>
+    /// <para>
+    /// The float <c>0x4CE410</c> hands back is a visibility, not a place along the line. It starts at one, and every
+    /// triangle the segment crosses -- anywhere along it, on an object that stands still or one that moves (the rigid
+    /// handler <c>0x4C35F0</c>'s loop, and the boned one's, <c>0x4D88D0</c>) -- takes its material's share
+    /// (<see cref="GameMaterial.SightVisibility"/>): a share of nothing ends the cast hidden, and any other is
+    /// multiplied in where the line meets the triangle's front. Terrain leaves nothing. So a door leaf hides whoever
+    /// stands behind it however close to it they stand; the line only survives glass, a ladder, and one run of fence.
+    /// </para>
+    /// </remarks>
+    /// <param name="ignoredOwner">The viewer itself, when it has a body the ray would otherwise meet -- a vehicle.</param>
+    /// <param name="standsAside">
+    /// Whether an object the ray meets answers the detection ray that it is not in the way: a stationary gun does, for
+    /// a ray from or to the human on it (<c>0x4752B0</c>).
+    /// </param>
+    /// <returns><see langword="true"/> when the line is clear.</returns>
+    public static bool HasLineOfSight(
+        WorldTraceCast trace,
+        Vector3d from,
+        Vector3d to,
+        double minimumVisibility,
+        GameTask? ignoredOwner = null,
+        Func<GameTask, bool>? standsAside = null)
+    {
+        ArgumentNullException.ThrowIfNull(trace);
+
+        Vector3d segment = new(to.X - from.X, to.Y - from.Y, to.Z - from.Z);
+        double segmentLength = Math.Sqrt((segment.X * segment.X) + (segment.Y * segment.Y) + (segment.Z * segment.Z));
+        Vector3d origin = from;
+        double travelled = 0d;
+        double visibility = 1d;
+        for (int step = 0; step <= SightSkipLimit; step++)
+        {
+            // Portal faces are not traced. They describe the doorway and window openings for the renderer's
+            // sector visibility, not collision, so 0x4CE410's object handlers never meet them; a closed
+            // door leaf is its own collision geometry and still blocks.
+            if (!trace(new WorldTraceRequest(origin, to, WorldTraceMask.World, IgnoredOwner: ignoredOwner), out WorldTraceHit hit))
+            {
+                return Seen(visibility, minimumVisibility);
+            }
+
+            // An object that answers the detection ray that it is not in the way is left before any of its
+            // triangles is asked (the filter call at the head of 0x4C35F0).
+            bool aside = standsAside is not null && hit.Owner is { } owner && standsAside(owner);
+            if (!aside)
+            {
+                // The traversal budget is a safety bound, not evidence that the remainder is clear: past
+                // it, whatever the cast reports is cover.
+                double share = hit.Kind is WorldTraceHitKind.Terrain || step == SightSkipLimit
+                    ? 0d
+                    : GameMaterial.SightVisibility(hit.Material);
+                if (share <= 0d || segmentLength <= 0d)
+                {
+                    return false;
+                }
+
+                // Only a triangle met from its front takes its share; one met from behind is passed.
+                if ((hit.Normal.X * segment.X) + (hit.Normal.Y * segment.Y) + (hit.Normal.Z * segment.Z) < 0d)
+                {
+                    visibility *= share;
+                }
+            }
+
+            double remaining = segmentLength - travelled;
+            double advance = hit.Distance + SightSkipEpsilonUnits;
+            if (advance >= remaining)
+            {
+                return Seen(visibility, minimumVisibility);
+            }
+
+            travelled += advance;
+            double fraction = travelled / segmentLength;
+            origin = new(from.X + (segment.X * fraction), from.Y + (segment.Y * fraction), from.Z + (segment.Z * fraction));
+        }
+
+        return Seen(visibility, minimumVisibility);
+    }
+
+    // What is left of the line is something, and enough for whoever is looking.
+    private static bool Seen(double visibility, double minimumVisibility) =>
+        visibility > 0d && visibility >= minimumVisibility;
+
+    /// <summary>Nearest positive entry of a ray (unit direction) into a sphere, within reach. Distance is along the ray.</summary>
+    public static bool RaySphere(Vector3d origin, Vector3d dir, Vector3d centre, double radius, double reach, out double t)
+    {
+        t = 0.0;
+        double ox = origin.X - centre.X;
+        double oy = origin.Y - centre.Y;
+        double oz = origin.Z - centre.Z;
+        double b = (ox * dir.X) + (oy * dir.Y) + (oz * dir.Z);
+        double c = (ox * ox) + (oy * oy) + (oz * oz) - (radius * radius);
+        double disc = (b * b) - c;
+        if (disc < 0.0)
+        {
+            return false;
+        }
+
+        double root = Math.Sqrt(disc);
+        double near = -b - root;
+        double far = -b + root;
+        t = near >= 0.0 ? near : far;
+        return t >= 0.0 && t <= reach;
+    }
+
+    /// <summary><c>0x45F580</c>'s test of one segment against a human's sphere.</summary>
+    /// <param name="from">The segment's start.</param>
+    /// <param name="to">The segment's end.</param>
+    /// <param name="centre">The sphere's centre.</param>
+    /// <param name="radius">The sphere's radius.</param>
+    /// <returns>Whether the segment meets the sphere.</returns>
+    /// <remarks>
+    /// The squared distance from the sphere's centre to the segment's LINE against the radius squared, and the
+    /// segment's box against the sphere's box: the two tests together, with no clamp to the segment's ends.
+    /// </remarks>
+    public static bool SegmentMeetsSphere(Vector3d from, Vector3d to, Vector3d centre, double radius)
+    {
+        double ax = from.X - centre.X, ay = from.Y - centre.Y, az = from.Z - centre.Z;
+        double bx = to.X - centre.X, by = to.Y - centre.Y, bz = to.Z - centre.Z;
+        if (Math.Min(ax, bx) > radius || Math.Min(ay, by) > radius || Math.Min(az, bz) > radius
+            || Math.Max(ax, bx) < -radius || Math.Max(ay, by) < -radius || Math.Max(az, bz) < -radius)
+        {
+            return false;
+        }
+
+        double dx = to.X - from.X, dy = to.Y - from.Y, dz = to.Z - from.Z;
+        double length = (dx * dx) + (dy * dy) + (dz * dz);
+        double along = (-ax * dx) + (-ay * dy) + (-az * dz);
+        double offLine = (ax * ax) + (ay * ay) + (az * az) - (length > 0.0 ? along * along / length : 0.0);
+        return radius * radius >= offLine;
+    }
+
+    /// <summary>The radius of a soldier's sphere (<c>Human+160</c>) in world units: its model's bound, or the default.</summary>
+    /// <param name="view">The soldier.</param>
+    /// <returns>The radius the ray and segment visits test against.</returns>
+    public static double BoundUnitsOf(SoldierView view) =>
+        (view.DetectorMarkerScaleMetres is > 0f and var bound
+            ? bound
+            : DefaultHumanBoundMetres) * WorldScene.UnitsPerMetre;
+
+    /// <summary>Gives a new brain its eye, its view and its sight cast, from the palette its body is created with.</summary>
+    /// <param name="brain">The brain.</param>
+    /// <param name="view">Its body.</param>
+    public void BindViewTracking(Igi1HumanAi brain, SoldierView view)
+    {
+        brain.SetScriptSound((name, attached) => _scriptSound(name, view.Position, attached ? () => view.Position : null));
+
+        // A new human's palette is built once, at its creation, from its authored heading (0x463220 sets the facing
+        // and rebuilds it through 0x4D38C0): the eye of a soldier nobody has drawn or looked past is the rest eye
+        // turned by the heading it was placed with, B * R. Probed on mission 4: thirteen undrawn soldiers placed at
+        // 0, 24, -54, -78, 96 and 108 degrees, B * R to 1e-4 each, constant for as long as nothing refreshed them --
+        // and patrol 408 kept its placed -96 degrees although it turned on its first tick. Every mission-1 guard is
+        // placed at 0, which is why they all shared R itself.
+        Matrix3f placedEye = brain.Orientation * RestEyeOrientation;
+        if (_context.FindAgent(view) is { } placed)
+        {
+            placed.EyeOrientation = null;
+            placed.EyeOffset = null;
+            Vector3f restGun = brain.Orientation.Transposed().Transform(RestGunOffset);
+            placed.GunOffset = new Vector3d(restGun.X, restGun.Y, restGun.Z);
+            placed.OriginBeforeTick = SoldierContext.OccupantOrigin(view);
+        }
+
+        brain.SightCast = (from, to, target) => RefreshEyesAlong(from, to, view.Soldier.Id, target);
+        brain.ViewPositionProvider = () => SoldierContext.ViewPosition(view, brain);
+
+        // The eye's position comes out of the same palette entry (0x44F410: Human+32 plus bone 5's translation, model
+        // +684..692), so it too is the placed rest eye until something rebuilds the palette -- and between rebuilds it
+        // follows the origin, not the pose.
+        Vector3f restOffset = brain.Orientation.Transposed().Transform(RestEyeOffset);
+        Vector3d placedEyeOffset = new(restOffset.X, restOffset.Y, restOffset.Z);
+        brain.SetEyeTransform(
+            () =>
+            {
+                if (view.Pose().BoneCount <= HumanAttachPoints.AiEye)
+                {
+                    return new Vector3d(
+                        view.Position.X,
+                        view.Position.Y,
+                        view.Position.Z + Igi1HumanAi.HumanSeparationEyeHeight);
+                }
+
+                SoldierAgent? member = _context.FindAgent(view);
+                if (member is { InView: true })
+                {
+                    RebuildEye(member, view, brain);
+                }
+
+                return SoldierContext.OccupantOrigin(view) + (member?.EyeOffset ?? placedEyeOffset);
+            },
+            // The matrix is the eye bone's, as the palette holds it (0x44F410 copies bone 5's entry, +696): the body's
+            // own matrix times the bone's rotation in the pose the soldier had when the palette was last built.
+            // Probed on mission 4: running squad member 404's refreshed eye, taken back into his body's frame,
+            // matched clip 60's eye bone to the clip phase, pitched 12 degrees down where the body's heading is level.
+            //
+            // But only when the palette is rebuilt. 0x44F410 copies the eye's matrix out of the bone palette
+            // ([Human+0x70]+0x2B8), and 0x45F240 rebuilds it -- while the soldier's dirty byte (+216, set by its
+            // per-tick 0x45D080) is up -- from two places: the camera pass 0x45F140, for a soldier inside the
+            // render camera's frustum at LOD < 4 (ObserveView), and the ray and segment visits 0x45F500 / 0x45F800,
+            // for a soldier some cast passes (RefreshEyesAlong). A guard nothing refreshes keeps looking the way it
+            // last did -- and one never refreshed along its placed heading's rest eye.
+            () =>
+            {
+                SoldierAgent? member = _context.FindAgent(view);
+                if (member is null)
+                {
+                    return brain.ViewOrientation;
+                }
+
+                if (member.InView)
+                {
+                    RebuildEye(member, view, brain);
+                }
+
+                return member.EyeOrientation ?? placedEye;
+            });
+    }
+
+    /// <summary>What a round does to the humans along its flight: rebuilds their palettes, and so their eyes.</summary>
+    /// <param name="from">Where the round starts, in world units.</param>
+    /// <param name="to">The end of its reach.</param>
+    /// <param name="shooterTeam">The firing human's side (Human+252).</param>
+    /// <param name="shooter">The firing soldier, or <see langword="null"/> for the player.</param>
+    /// <remarks>
+    /// The round's cast (<c>0x47B750</c> -> <c>0x4CC2A0</c>) visits the humans along its remaining path through the
+    /// Human's ray visit <c>0x45F500</c>, which asks the class filter first -- the evaluate <c>0x45E3E0</c>, which
+    /// lets a round pass through its shooter's own side unvisited -- then <c>0x45F580</c>'s sphere test, then rebuilds
+    /// the palette (<c>0x45F240</c>), whether or not the round goes on to strike that body. Probed on mission 4: guard
+    /// 411's eye was rebuilt every three ticks by the squad's rounds from tick 4559.
+    /// </remarks>
+    public void RefreshEyesAlongRound(Vector3d from, Vector3d to, int shooterTeam, SoldierView? shooter)
+    {
+        foreach (SoldierModelGroup group in _context.Roster)
+        {
+            foreach (SoldierAgent member in group.Agents)
+            {
+                SoldierView view = member.View;
+                if (ReferenceEquals(view, shooter) || view.IsDead || view.Soldier.Team == shooterTeam
+                    || !ConditionalContainerGate.IsTaskActive(view.Soldier)
+                    || !_context.Brains.TryGetValue(view, out Igi1HumanAi? brain))
+                {
+                    continue;
+                }
+
+                double radius = BoundUnitsOf(view);
+                if (SegmentMeetsSphere(from, to, SoldierContext.OccupantOrigin(view), radius))
+                {
+                    RebuildEye(member, view, brain);
+                    SoldierSimulation.PaletteRebuildTraced?.Invoke(view.Soldier.Id, "round", from, to);
+                }
+            }
+        }
+    }
+
+    /// <summary>A round of the player's passes: the eyes along it are rebuilt, as for any round (see <see cref="RefreshEyesAlongRound"/>).</summary>
+    /// <param name="from">Where the round starts, in world units.</param>
+    /// <param name="to">The end of its reach.</param>
+    public void RefreshEyesAlongPlayerRound(Vector3d from, Vector3d to) =>
+        RefreshEyesAlongRound(from, to, _context.PlayerTeam, shooter: null);
+
+    /// <summary>
+    /// The humans the detection scan offers one soldier this tick — <c>0x489750</c> over each human's own
+    /// description (<c>0x45FE30</c>).
+    /// </summary>
+    /// <remarks>
+    /// The global human list's order: the player first, then every soldier whose container is live, the
+    /// soldier itself left out. Each is described from this soldier's side, so the scan can register the
+    /// living of the other side as enemies and the dead of its own as fallen friends. The list is this query's
+    /// own and is refilled by the next call, so it is read before then and not kept.
+    /// </remarks>
+    public List<AiDetectionCandidate> CandidatesFor(
+        SoldierView self,
+        Igi1HumanAi brain,
+        Vector3d playerFeet,
+        Vector3d playerMark,
+        bool playerAlive,
+        bool playerCrouching)
+    {
+        // One list, refilled for each soldier: the brain reads it during its tick and keeps none of it, and a new
+        // one per soldier per tick was the largest garbage the simulation made.
+        List<AiDetectionCandidate> humans = _candidates;
+        humans.Clear();
+        humans.Add(new(AiDetectionCandidate.PlayerId, brain.PlayerIsEnemy, playerAlive, playerMark, playerFeet,
+            playerCrouching, _context.PlayerTarget));
+        foreach ((SoldierView view, Igi1HumanAi other) in _context.Brains)
+        {
+            if (ReferenceEquals(view, self) || !ConditionalContainerGate.IsTaskActive(view.Soldier))
+            {
+                continue;
+            }
+
+            Vector3d soldierFeet = new(
+                view.Position.X,
+                view.Position.Y,
+                _context.SnapToGround(view.Position.X, view.Position.Y, view.Position.Z));
+            // The mark a sight ray aims at is the human's view position (0x465820): its origin raised 0.7 m, or 0.35 m
+            // with the crouch byte -- so it kneels with a kneeling soldier and lies with a corpse.
+            Vector3d soldierMark = SoldierContext.ViewPosition(view, other);
+            AiCombatTarget record = _npcTargets.GetOrAdd(view, NewTarget);
+            humans.Add(new AiDetectionCandidate(
+                view.Soldier.Id,
+                view.Soldier.Team != self.Soldier.Team,
+                !view.IsDead && other.Activity != AiSoldierActivity.Dead && !_context.HealthOf(view).IsDead,
+                soldierMark,
+                soldierFeet,
+                Crouching: other.Body.CrouchByte,
+                record,
+                SoldierContext.OccupantOrigin(view)));
+        }
+
+        return humans;
+    }
+
+    /// <summary>
+    /// The humans the detection scan offers one soldier this tick, by reference -- the list <see cref="CandidatesFor"/> describes,
+    /// in the same order, each soldier described only when the scan reads it (see <see cref="Igi1AiTrackedHuman"/>).
+    /// </summary>
+    /// <remarks>
+    /// <c>0x489750</c> walks the global human list on the detector's phase tick and keeps a reference to each task it files;
+    /// what the soldier later reads of a human -- where it stands, whether it lives -- it reads through that reference. The list
+    /// is this query's own and is refilled by the next call. Each offered soldier's damage state is made here, as describing it
+    /// made it, so the first hit finds the same health it always did.
+    /// </remarks>
+    public List<AiHumanReference> HumansFor(
+        SoldierView self,
+        Igi1HumanAi brain,
+        Vector3d playerFeet,
+        Vector3d playerMark,
+        bool playerAlive,
+        bool playerCrouching)
+    {
+        List<AiHumanReference> humans = _references;
+        humans.Clear();
+        humans.Add(new AiHumanReference(new AiDetectionCandidate(AiDetectionCandidate.PlayerId, brain.PlayerIsEnemy, playerAlive,
+            playerMark, playerFeet, playerCrouching, _context.PlayerTarget)));
+        foreach ((SoldierView view, Igi1HumanAi other) in _context.Brains)
+        {
+            if (ReferenceEquals(view, self) || !ConditionalContainerGate.IsTaskActive(view.Soldier))
+            {
+                continue;
+            }
+
+            if (!_sources.TryGetValue(view, out AiHumanSource? source))
+            {
+                source = new AiHumanSource(view, other);
+                _sources[view] = source;
+            }
+            else if (!ReferenceEquals(source.Brain, other))
+            {
+                source.Brain = other;
+            }
+
+            source.Health = _context.HealthOf(view);
+
+            humans.Add(new AiHumanReference(this, source, view.Soldier.Team != self.Soldier.Team));
+        }
+
+        return humans;
+    }
+
+    /// <summary>Whether a soldier lives, as its description says: body, brain and damage all alive.</summary>
+    /// <param name="source">The soldier.</param>
+    /// <returns><see langword="true"/> while it lives.</returns>
+    internal static bool IsAlive(AiHumanSource source) =>
+        !source.View.IsDead && source.Brain.Activity != AiSoldierActivity.Dead && !source.Health.IsDead;
+
+    /// <summary>One soldier as another's scan reads it: <see cref="CandidatesFor"/>'s description of it, as it is now.</summary>
+    /// <param name="source">The soldier.</param>
+    /// <param name="otherSide">Whether it is on the other side from the soldier looking.</param>
+    /// <returns>The description.</returns>
+    internal AiDetectionCandidate Describe(AiHumanSource source, bool otherSide)
+    {
+        SoldierView view = source.View;
+        Igi1HumanAi other = source.Brain;
+        Vector3d soldierFeet = new(
+            view.Position.X,
+            view.Position.Y,
+            _context.SnapToGround(view.Position.X, view.Position.Y, view.Position.Z));
+        Vector3d soldierMark = SoldierContext.ViewPosition(view, other);
+        AiCombatTarget record = _npcTargets.GetOrAdd(view, NewTarget);
+        return new AiDetectionCandidate(
+            view.Soldier.Id,
+            otherSide,
+            IsAlive(source),
+            soldierMark,
+            soldierFeet,
+            Crouching: other.Body.CrouchByte,
+            record,
+            SoldierContext.OccupantOrigin(view));
+    }
+
+    /// <summary>
+    /// Adds every soldier whose container is live, in the global human list's order, as a detection record that is not a
+    /// soldier's own is offered them (<c>0x45FE30</c>): its mark mid-body, its origin, its side and whether it lives.
+    /// </summary>
+    /// <param name="into">The list the soldiers are added to.</param>
+    public void AddDetectables(List<AiDetectable> into)
+    {
+        ArgumentNullException.ThrowIfNull(into);
+        foreach ((SoldierView view, Igi1HumanAi brain) in _context.Brains)
+        {
+            if (!ConditionalContainerGate.IsTaskActive(view.Soldier))
+            {
+                continue;
+            }
+
+            into.Add(new AiDetectable(
+                view,
+                SoldierContext.ViewPosition(view, brain),
+                SoldierContext.OccupantOrigin(view),
+                view.Soldier.Team,
+                !view.IsDead && brain.Activity != AiSoldierActivity.Dead && !_context.HealthOf(view).IsDead,
+                view.Soldier));
+        }
+    }
+
+    /// <summary>Whether an AI sight ray from one point to another is clear, for scenario runs.</summary>
+    public bool ClearSightForTesting(Vector3d from, Vector3d to) =>
+        SightTraceForTesting is { } trace
+        && HasLineOfSight(trace, from, to, Igi1HumanAi.MinimumSightVisibility);
+
+    /// <summary>What an AI sight ray from one point to another meets first, for scenario traces.</summary>
+    public string DescribeSightForTesting(Vector3d from, Vector3d to)
+    {
+        if (SightTraceForTesting is not { } trace)
+        {
+            return "no trace";
+        }
+
+        bool clear = HasLineOfSight(trace, from, to, Igi1HumanAi.MinimumSightVisibility);
+        WorldTraceRequest request = new(from, to, WorldTraceMask.World) { TracePortals = false };
+        Vector3d along = to - from;
+        return trace(in request, out WorldTraceHit hit)
+            ? $"clear={clear} facing={((hit.Normal.X * along.X) + (hit.Normal.Y * along.Y) + (hit.Normal.Z * along.Z) < 0 ? "front" : "BACK")} hit {hit.Kind} at {hit.Distance / 4096.0:0.00} m of {Vector3d.Distance(from, to) / 4096.0:0.00} m, fraction {hit.Fraction:0.000}, material {hit.Material} '{hit.Label}' owner {hit.Owner?.Id}, at ({hit.Position.X / 4096.0:0.0},{hit.Position.Y / 4096.0:0.0},{hit.Position.Z / 4096.0:0.0})"
+            : $"clear={clear} no contact";
+    }
+
+    /// <summary>Rebuilds a soldier's palette as far as its eye goes -- <c>0x45F240</c>: the eye bone's matrix and its offset.</summary>
+    private static void RebuildEye(SoldierAgent member, SoldierView view, Igi1HumanAi brain)
+    {
+        member.EyeOrientation = PosedEye(view, brain);
+
+        // The palette holds each bone's offset from the origin (Human+32), turned by the body's matrix: the eye's and the
+        // gun's are kept that way, and follow the origin until the next rebuild. Probed on mission 4: squad member 405's
+        // gun matched its hand in this pose -- the clocks a tick on -- on every tick a rebuild had run, and otherwise
+        // trailed the body by the offset it last had.
+        BonePose pose = view.UnrotatedPoseAhead();
+        Matrix3f toWorld = view.Orientation.Transposed();
+        if (HumanAttachPoints.AiEye < pose.BoneCount)
+        {
+            Vector3f eye = toWorld.Transform(pose.Positions[HumanAttachPoints.AiEye]);
+            member.EyeOffset = new Vector3d(eye.X, eye.Y, eye.Z);
+        }
+
+        if (HumanAttachPoints.ThirdPersonWeapon < pose.BoneCount)
+        {
+            Vector3f hand = toWorld.Transform(pose.Positions[HumanAttachPoints.ThirdPersonWeapon]);
+            member.GunOffset = new Vector3d(hand.X, hand.Y, hand.Z);
+        }
+
+        if (HumanAttachPoints.AiThrow < pose.BoneCount)
+        {
+            Vector3f thrown = toWorld.Transform(pose.Positions[HumanAttachPoints.AiThrow]);
+            member.ThrowOffset = new Vector3d(thrown.X, thrown.Y, thrown.Z);
+        }
+    }
+
+    /// <summary>The eye matrix a palette rebuilt now would hold: the body's matrix times the eye bone's posed rotation.</summary>
+    /// <param name="view">The soldier's rig.</param>
+    /// <param name="brain">Its brain, whose matrix is the body's (Human+120).</param>
+    /// <returns>The eye's orientation, or the view's own when the rig has no eye bone.</returns>
+    private static Matrix3f PosedEye(SoldierView view, Igi1HumanAi brain)
+    {
+        // The palette is rebuilt between ticks, from clocks already a tick past the pose the body was stepped with.
+        BonePose pose = view.UnrotatedPoseAhead();
+        return HumanAttachPoints.AiEye < pose.BoneCount
+            ? brain.Orientation * pose.Rotations[HumanAttachPoints.AiEye]
+            : brain.ViewOrientation;
+    }
+
+    /// <summary>
+    /// What an AI sight ray does to the humans it passes: rebuilds their bone palettes, and so their eyes.
+    /// </summary>
+    /// <param name="from">The ray's start, the looker's eye, in world units.</param>
+    /// <param name="to">The ray's end, the target's mark, in world units.</param>
+    /// <param name="lookerId">The looking soldier's task id.</param>
+    /// <param name="targetId">The looked-at human's id.</param>
+    /// <remarks>
+    /// <para>
+    /// <c>0x489B20</c> casts through <c>0x4CE410</c>, which visits every dynamic object along the whole segment
+    /// (message 8, <c>0x4C8130</c>) before it consults static geometry -- so a wall between does not spare anyone.
+    /// The human filter it hands the visit (<c>0x42FC50</c>) admits every human but the looker and the target. A
+    /// human it admits is tested by <c>0x45F580</c>: the segment against a sphere of the model's bound
+    /// (<c>Human+160</c>) about the origin (<c>Human+32</c>), the perpendicular distance from the line and the two
+    /// boxes' overlap. On a hit <c>0x45F800</c> rebuilds the palette (<c>0x45F240</c>).
+    /// </para>
+    /// <para>
+    /// Probed on mission 4: squad member 404 ran beside 405, and every 12 ticks guard 411's ray to 405 refreshed
+    /// 404 -- never 405 itself. 404's ray to 411 at tick 4544 refreshed bystander 403, whose eye then turned
+    /// south and saw guards 409 and 410 three ticks later.
+    /// </para>
+    /// </remarks>
+    private void RefreshEyesAlong(Vector3d from, Vector3d to, int lookerId, int targetId)
+    {
+        foreach (SoldierModelGroup group in _context.Roster)
+        {
+            foreach (SoldierAgent member in group.Agents)
+            {
+                SoldierView view = member.View;
+                if (view.Soldier.Id == lookerId || view.Soldier.Id == targetId || view.IsDead
+                    || !ConditionalContainerGate.IsTaskActive(view.Soldier)
+                    || !_context.Brains.TryGetValue(view, out Igi1HumanAi? brain))
+                {
+                    continue;
+                }
+
+                double radius = BoundUnitsOf(view);
+                if (SegmentMeetsSphere(from, to, SoldierContext.OccupantOrigin(view), radius))
+                {
+                    RebuildEye(member, view, brain);
+                    SoldierSimulation.PaletteRebuildTraced?.Invoke(view.Soldier.Id, "ray", from, to);
+                }
+            }
+        }
+    }
+}

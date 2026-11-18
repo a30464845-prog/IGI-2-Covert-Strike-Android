@@ -1,0 +1,212 @@
+using OpenIGI.Engine.Tasks;
+using OpenIGI.Game.Level;
+using OpenIGI.Scripting.Expressions;
+
+namespace OpenIGI.Game.World;
+
+/// <summary>
+/// One simulation tick of the level as the original runs it: a single depth-first walk of the task tree in
+/// authored order, each task running its own update -- which decides whether, and when, its children run.
+/// </summary>
+/// <remarks>
+/// <para>
+/// The original has no grouped passes: <c>Flow_Update</c> walks the root's children, and a type that wants its subtree to tick walks its own children from inside its update
+/// (<c>Task_UpdateChildren</c>, <c>0x488700</c>), before, after or in the middle of its own work. So a task
+/// reads this tick's state from everything before it in the tree and last tick's from everything after.
+/// </para>
+/// <para>
+/// It is I.G.I.'s <see cref="LevelRun"/>. Subsystems bind the update of the tasks they own; a task nobody bound behaves as a plain
+/// container and walks its children -- except <c>Static</c> and <c>Idle</c>, whose update is a no-op in the
+/// original, freezing everything beneath them. A <see cref="ConditionalContainerTask"/> runs the shared handler under the
+/// first game's rules (<see cref="IConditionalContainerRules"/>). Unlike I.G.I. 2's run, the walk does not pass over a task
+/// already marked deleted.
+/// </para>
+/// </remarks>
+public sealed class LevelUpdateWalker : LevelRun, IConditionalContainerRules
+{
+    private readonly Dictionary<GameTask, Action<GameTask>> _deactivations = [];
+
+    /// <summary>Initializes a new instance of the <see cref="LevelUpdateWalker"/> class.</summary>
+    /// <param name="root">The level's root task.</param>
+    public LevelUpdateWalker(GameTask root)
+        : base(root)
+    {
+    }
+
+    /// <summary>Gets or sets what runs a conditional container's start or stop script, after its children ran.</summary>
+    public Action<ConditionalContainerTask, string>? ContainerScript { get; set; }
+
+    /// <summary>Gets or sets a container whose run state is held rather than re-evaluated this tick.</summary>
+    public Func<ConditionalContainerTask, bool>? HoldContainer { get; set; }
+
+    /// <summary>Gets or sets the mission's variables and natives, which the level's expressions are evaluated against.</summary>
+    public LevelExpressionRuntime? Expressions { get; set; }
+
+    /// <inheritdoc/>
+    public override bool EvaluatesExpressions => Expressions is not null;
+
+    /// <inheritdoc/>
+    public override LevelExpression Compile(string? source, GameTask owner)
+    {
+        ArgumentNullException.ThrowIfNull(owner);
+        return LevelExpressionRuntime.Create(source, owner);
+    }
+
+    /// <inheritdoc/>
+    /// <exception cref="InvalidOperationException">The walk was given no <see cref="Expressions"/>.</exception>
+    public override double Evaluate(LevelExpression expression)
+    {
+        ArgumentNullException.ThrowIfNull(expression);
+        LevelExpressionRuntime runtime = Expressions
+            ?? throw new InvalidOperationException("The level's walk was given no variables to evaluate an expression against.");
+        return runtime.Evaluate(expression);
+    }
+
+    /// <inheritdoc/>
+    /// <exception cref="InvalidOperationException">The walk was given no <see cref="Expressions"/>.</exception>
+    public override double EvaluateLine(string source)
+    {
+        LevelExpressionRuntime runtime = Expressions
+            ?? throw new InvalidOperationException("The level's walk was given no variables to evaluate a line of script against.");
+        return runtime.EvaluateLine(source);
+    }
+
+    /// <summary>Registers what a task does when its conditional container takes it out of the world.</summary>
+    /// <param name="task">The task.</param>
+    /// <param name="deactivate">Its deactivation.</param>
+    public void RegisterDeactivation(GameTask task, Action<GameTask> deactivate)
+    {
+        ArgumentNullException.ThrowIfNull(task);
+        ArgumentNullException.ThrowIfNull(deactivate);
+        _deactivations[task] = deactivate;
+    }
+
+    /// <summary>Runs one tick: the root's children in order, and the tick counted.</summary>
+    public void Tick()
+    {
+        RunChildren(Root);
+        CountTick();
+    }
+
+    /// <inheritdoc/>
+    /// <remarks>Project I.G.I.'s handler (<c>0x4874E0</c>) runs the children while the container runs or ran last tick.</remarks>
+    bool IConditionalContainerRules.RunsChildrenTheTickItStops => true;
+
+    /// <inheritdoc/>
+    /// <remarks>A held container keeps its state; one no gate prepared runs.</remarks>
+    bool? IConditionalContainerRules.Condition(ConditionalContainerTask container)
+    {
+        if (HoldContainer?.Invoke(container) == true)
+        {
+            return null;
+        }
+
+        return container.ResolveCondition();
+    }
+
+    /// <inheritdoc/>
+    void IConditionalContainerRules.RunScript(ConditionalContainerTask container, string script) =>
+        ContainerScript?.Invoke(container, script);
+
+    /// <inheritdoc/>
+    void IConditionalContainerRules.PutChildrenInWorld(ConditionalContainerTask container) => Activate(container);
+
+    /// <inheritdoc/>
+    void IConditionalContainerRules.TakeChildrenOutOfWorld(ConditionalContainerTask container) => Deactivate(container);
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// <c>Static</c> and <c>Idle</c> do nothing; anything else walks its children. <c>Dynamic</c> (<c>0x4F0660</c>) walks its
+    /// children, and what the level made while it runs is among them, added at the end: <see cref="DynamicTail"/>.
+    /// </remarks>
+    protected override void RunUntyped(GameTask task)
+    {
+        ArgumentNullException.ThrowIfNull(task);
+        if (task is StaticTask or IdleTask)
+        {
+            return;
+        }
+
+        if (task is not DynamicTask)
+        {
+            RunChildren(task);
+            return;
+        }
+
+        // Dynamic's children are the level's objects and, among them, the tasks made under it while the level was built: a
+        // gun's GunShot task is made as the gun is (Gun's create handler, 0x478540 -> Task_New on Level_GetDynamic, which
+        // links at the tail), so it stands after the child of Dynamic its gun was made under, and before the next.
+        GameTask? child = task.FirstChild;
+        while (child is not null)
+        {
+            GameTask? next = child.NextSibling;
+            Run(child);
+            AfterDynamicChild?.Invoke(child);
+            child = next;
+        }
+
+        DynamicTail?.Invoke();
+    }
+
+    /// <summary>
+    /// Gets or sets the run of the tasks made under <c>Dynamic</c> while one of its children was built -- the
+    /// <c>GunShot</c> tasks of the guns under that child -- which the walk reaches as it leaves the child.
+    /// </summary>
+    public Action<GameTask>? AfterDynamicChild { get; set; }
+
+    /// <summary>
+    /// Gets or sets the run of the tasks the level made while it runs -- what was thrown and fired, <c>Level_GetDynamic</c>'s
+    /// children (<c>0x4F0EE0</c>) -- which the walk reaches after the <c>Dynamic</c> task's own children, where the original
+    /// keeps them.
+    /// </summary>
+    public Action? DynamicTail { get; set; }
+
+    /// <inheritdoc/>
+    /// <remarks>I.G.I.'s walk reaches every linked child, deleted or not.</remarks>
+    protected override bool Skips(GameTask child) => false;
+
+    internal void Deactivate(GameTask parent)
+    {
+        for (GameTask? child = parent.FirstChild; child is not null; child = child.NextSibling)
+        {
+            if (child is ConditionalContainerTask inner)
+            {
+                if (inner.IsActive)
+                {
+                    inner.IsActive = false;
+                    Deactivate(inner);
+                }
+
+                continue;
+            }
+
+            if (_deactivations.TryGetValue(child, out Action<GameTask>? deactivate))
+            {
+                deactivate(child);
+            }
+
+            Deactivate(child);
+        }
+    }
+
+    /// <summary>Brings a subtree into the world; an inner container passes it on only if it runs and is not active (<c>0x487A70</c>).</summary>
+    /// <param name="parent">The container whose children are activated.</param>
+    internal static void Activate(GameTask parent)
+    {
+        for (GameTask? child = parent.FirstChild; child is not null; child = child.NextSibling)
+        {
+            if (child is ConditionalContainerTask inner)
+            {
+                if (inner.IsRun && !inner.IsActive)
+                {
+                    inner.IsActive = true;
+                    Activate(inner);
+                }
+
+                continue;
+            }
+
+            Activate(child);
+        }
+    }
+}

@@ -1,0 +1,994 @@
+using System.Collections.Concurrent;
+using System.Diagnostics;
+using System.Globalization;
+using OpenIGI.Core.Diagnostics;
+using OpenIGI.Core.Titles;
+using OpenIGI.Launcher.Services;
+using OpenIGI.Releases;
+
+namespace OpenIGI.Launcher;
+
+/// <summary>Where a game stands in the launcher: what the main button offers to do about it.</summary>
+internal enum GameState
+{
+    /// <summary>Installed, current, and its game folder found: PLAY.</summary>
+    Ready,
+
+    /// <summary>Installed with a newer version out, or a beta build kept after switching to stable: UPDATE.</summary>
+    UpdateAvailable,
+
+    /// <summary>Not on disk: INSTALL.</summary>
+    NotInstalled,
+
+    /// <summary>Installed, but the original game's folder is not known: SET FOLDER.</summary>
+    NeedsGameFolder,
+
+    /// <summary>Installed files failed a verify: REPAIR.</summary>
+    Damaged,
+
+    /// <summary>Running now.</summary>
+    Playing,
+
+    /// <summary>Not released yet: nothing to do.</summary>
+    Unavailable,
+}
+
+/// <summary>One game the launcher manages.</summary>
+/// <remarks>Both titles run on the same OpenIGI build, so they share its install and its updates.</remarks>
+internal sealed class LauncherGame
+{
+    public required string Id { get; init; }
+
+    public required string Title { get; init; }
+
+    public required string Tagline { get; init; }
+
+    /// <summary>Gets the original game this entry runs, or <see langword="null"/> for one with no build yet.</summary>
+    public GameTitle? Retail { get; init; }
+
+    /// <summary>Gets whether this entry can be installed and played yet.</summary>
+    /// <remarks>
+    /// An entry that is not is still listed, so players can see what is coming, but cannot be chosen: it never
+    /// offers an install, an update or PLAY, and never counts towards the update badge.
+    /// </remarks>
+    public bool Released { get; init; }
+
+    /// <summary>Gets the switches this entry adds to the game's command line, such as <c>+editor</c> for the editor.</summary>
+    /// <remarks>
+    /// The editor is not a game of its own: it is the same build, started on <see cref="Retail"/>'s files and opened
+    /// straight into the editor, which can switch to the other title from inside.
+    /// </remarks>
+    public IReadOnlyList<string> LaunchSwitches { get; init; } = [];
+
+    /// <summary>Gets what the main button says when the entry is ready: PLAY for a game.</summary>
+    public string ReadyAction { get; init; } = "PLAY";
+
+    public GameState State { get; set; }
+
+    public string Version { get; set; } = string.Empty;
+
+    public string LatestVersion { get; set; } = string.Empty;
+
+    public int SizeMegabytes { get; set; }
+
+    public int UpdateMegabytes { get; set; }
+
+    public int ModsEnabled { get; init; }
+
+    /// <summary>Gets or sets the names of the optional content packs for this game, for the home page's summary.</summary>
+    public IReadOnlyList<string> OptionalPacks { get; set; } = [];
+
+    /// <summary>Gets or sets how many of <see cref="OptionalPacks"/> are installed.</summary>
+    public int PacksInstalled { get; set; }
+
+    public PatchNotes? Notes { get; set; }
+
+    /// <summary>Gets or sets the address of the newest release's full notes.</summary>
+    public string? NotesUrl { get; set; }
+}
+
+/// <summary>A release's notes: what the home page's card shows.</summary>
+internal sealed record PatchNotes(string Title, string Date, IReadOnlyList<PatchNote> Items);
+
+/// <summary>One line of release notes.</summary>
+internal sealed record PatchNote(PatchNoteKind Kind, string Text);
+
+/// <summary>What a release note is about, which decides its bullet's colour.</summary>
+internal enum PatchNoteKind
+{
+    /// <summary>Something new.</summary>
+    New,
+
+    /// <summary>Something that works differently.</summary>
+    Change,
+
+    /// <summary>Something that was broken.</summary>
+    Fix,
+}
+
+/// <summary>
+/// The launcher's state: what the update service offers, what is installed, and what is being downloaded.
+/// </summary>
+/// <remarks>
+/// Everything slow (asking the service, downloading, unpacking, verifying) runs off the frame loop; its
+/// results are queued and applied in <see cref="Tick"/>, so the pages only ever read state the loop owns.
+/// The service is asked once a minute (see <see cref="PollSchedule"/>), when the window regains focus, and
+/// when the channel changes. A release that comes out while the launcher is open turns the main button into
+/// UPDATE, or the footer's into a restart for a launcher release, and is announced once by a desktop
+/// notification when the launcher is in the background.
+/// </remarks>
+internal sealed partial class LauncherModel : IDisposable
+{
+    private const int NotesShown = 6;
+    private const string LogCategory = "Launcher";
+    private const string GameLogCategory = "Game";
+    private const string InstallLogCategory = "Install";
+
+    private readonly ConcurrentQueue<Action> _results = new();
+    private readonly LauncherLog _log;
+    private readonly IOpenIgiLogger _logger;
+    private long _launcherLogVersion = -1;
+    private long _gameLogVersion = -1;
+    private readonly HttpClient _http;
+    private readonly ReleaseFeedClient _feedClient;
+    private BuildInstaller _installer;
+    private readonly LauncherUpdater _selfUpdater;
+    private readonly string _settingsPath = Path.Combine(LauncherPaths.ConfigDirectory, "settings.json");
+
+    private InstalledBuild? _installed;
+    private ChannelFeed? _feed;
+    private ReleaseManifest? _latest;
+    private bool _checking;
+    private bool _damaged;
+    private readonly PollSchedule _schedule = new();
+    private Process? _running;
+    private string? _stagingLauncher;
+    private CancellationTokenSource? _download;
+    private bool _switching;
+    private bool _hiddenForGame;
+    private string? _notReusable;
+    private int _selected;
+
+    public LauncherModel(LauncherLog log)
+    {
+        ArgumentNullException.ThrowIfNull(log);
+        _log = log;
+        _logger = log.Logger;
+        Settings = LauncherSettings.Load(_settingsPath);
+        _http = new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
+        _http.DefaultRequestHeaders.UserAgent.ParseAdd($"OpenIGI-Launcher/{LauncherUpdater.OwnVersion}");
+        _feedClient = new ReleaseFeedClient(_http);
+        _installer = new BuildInstaller(_http, Path.Combine(Settings.Library, "openigi"));
+        _selfUpdater = new LauncherUpdater(new BuildInstaller(_http, Path.Combine(LauncherPaths.ConfigDirectory, "launcher-update")));
+        _installed = _installer.Current();
+        _contentClient = new ContentFeedClient(_http);
+        LoadInstalledContent();
+        LauncherUpdater.CleanUp();
+
+        Games =
+        [
+            new LauncherGame { Id = "igi1", Title = "Project I.G.I.", Tagline = "I'M GOING IN", Retail = GameTitle.Igi1, Released = true },
+            new LauncherGame { Id = "igi2", Title = "I.G.I. 2", Tagline = "COVERT STRIKE", Retail = GameTitle.Igi2, Released = true },
+            new LauncherGame
+            {
+                Id = "editor",
+                Title = "Editor",
+                Tagline = "MISSION TOOLS",
+                Retail = GameTitle.Igi1,
+                Released = true,
+                LaunchSwitches = ["+editor"],
+                ReadyAction = "OPEN",
+            },
+        ];
+        Recompute();
+    }
+
+    public IReadOnlyList<LauncherGame> Games { get; }
+
+    /// <summary>Gets or sets the index of the game the pages are about.</summary>
+    /// <remarks>Each game has its own content load order, so choosing another rebuilds the Content page's list.</remarks>
+    public int Selected
+    {
+        get => _selected;
+        set
+        {
+            if (_selected != value)
+            {
+                _selected = value;
+                BuildLoadOrder();
+                Changed();
+            }
+        }
+    }
+
+    public LauncherGame Current => Games[Selected];
+
+    public LauncherSettings Settings { get; }
+
+    /// <summary>Gets the running download, or <see langword="null"/>.</summary>
+    public DownloadJob? Job { get; private set; }
+
+    /// <summary>Gets what went wrong last (the service unreachable, a download failing), for the footer.</summary>
+    public string? Problem { get; private set; }
+
+    /// <summary>Gets the launcher's log and the log of the game it started, for the Logs page.</summary>
+    public LauncherLog Log => _log;
+
+    /// <summary>Gets the launcher release that is downloaded and waiting for a restart.</summary>
+    public string? LauncherUpdateReady { get; private set; }
+
+    /// <summary>Gets a number that changes whenever the pages need re-reading.</summary>
+    public int Revision { get; private set; }
+
+    /// <summary>Occurs when the game has started and the player asked for the launcher to go to the tray meanwhile.</summary>
+    public event EventHandler? HideRequested;
+
+    /// <summary>Occurs when the game the launcher went to the tray for has exited: the launcher comes back.</summary>
+    public event EventHandler? ShowRequested;
+
+    /// <summary>Gets or sets whether the launcher's window has focus; a notification is only for when it has not.</summary>
+    public bool WindowFocused { get; set; } = true;
+
+    /// <summary>Gets or sets what shows a desktop notification (title, message); none until the window gives one.</summary>
+    public Action<string, string>? Notify { get; set; }
+
+    /// <summary>Gets what the library holds for the launcher: the installed build and every installed pack.</summary>
+    public long LibraryBytes =>
+        (_installed?.Files.Sum(static f => f.Size) ?? 0) + Packs.Sum(static p => p.Installed?.Size ?? 0);
+
+    public int UpdatesAvailable => Games.Any(static g => g.State == GameState.UpdateAvailable) ? 1 : 0;
+
+    // Under a megabyte in kilobytes, so a small mod reads "140 KB" rather than "0 MB".
+    public static string FormatSize(double megabytes) =>
+        megabytes >= 1000
+            ? (megabytes / 1000).ToString("0.0", CultureInfo.InvariantCulture) + " GB"
+            : Math.Round(megabytes * 1000) < 1000
+                ? Math.Round(megabytes * 1000).ToString(CultureInfo.InvariantCulture) + " KB"
+                : Math.Round(megabytes).ToString(CultureInfo.InvariantCulture) + " MB";
+
+    /// <summary>Asks the update service again as soon as the spacing between checks allows.</summary>
+    public void CheckSoon() => _schedule.Soon(DateTime.UtcNow);
+
+    /// <summary>Does what the selected game's main button says.</summary>
+    /// <param name="openSettings">Shows the settings, for a game whose folder is still to be chosen.</param>
+    public void StartMainAction(Action openSettings)
+    {
+        ArgumentNullException.ThrowIfNull(openSettings);
+        LauncherGame game = Current;
+        switch (game.State)
+        {
+            case GameState.Ready:
+                Play(game);
+                break;
+            case GameState.NeedsGameFolder:
+                openSettings();
+                break;
+            case GameState.NotInstalled or GameState.UpdateAvailable or GameState.Damaged:
+                StartDownload();
+                break;
+        }
+    }
+
+    /// <summary>Pauses or resumes the running download; a resume picks up where the download stopped.</summary>
+    public void TogglePause()
+    {
+        if (Job is not { } job)
+        {
+            return;
+        }
+
+        if (job.Paused)
+        {
+            if (job.ContentId is { } pack)
+            {
+                InstallContent(pack);
+            }
+            else
+            {
+                StartDownload();
+            }
+        }
+        else
+        {
+            job.Paused = true;
+            _download?.Cancel();
+        }
+    }
+
+    /// <summary>Cancels the running download.</summary>
+    public void Cancel()
+    {
+        _download?.Cancel();
+        Job = null;
+        Recompute();
+    }
+
+    /// <summary>Checks the installed build against the hashes it was installed with.</summary>
+    public void Verify()
+    {
+        if (_installed is not { } build || Job is not null)
+        {
+            return;
+        }
+
+        Report("Verifying the installed files…");
+        Changed();
+        _ = Task.Run(() =>
+        {
+            IReadOnlyList<string> damaged = BuildInstaller.Verify(build);
+            _results.Enqueue(() =>
+            {
+                _damaged = damaged.Count > 0;
+                Report(_damaged ? $"{damaged.Count} file(s) are missing or changed: repair to download them again." : "Every installed file is intact.");
+                Recompute();
+            });
+        });
+    }
+
+    /// <summary>Opens the folder the launcher's log files are kept in.</summary>
+    public void OpenLogFolder()
+    {
+        Directory.CreateDirectory(LauncherLog.Folder);
+        Open(LauncherLog.Folder);
+    }
+
+    /// <summary>Empties the Logs page; the log files keep everything.</summary>
+    public void ClearLog()
+    {
+        _log.Launcher.Clear();
+        _log.Game.Clear();
+    }
+
+    /// <summary>Opens the installed build's folder in the system's file manager.</summary>
+    public void OpenFolder() => Open(_installed?.Folder ?? Settings.Library);
+
+    /// <summary>Opens the newest release's notes in the browser.</summary>
+    public void OpenNotes()
+    {
+        if (Current.NotesUrl is { } url)
+        {
+            Open(url);
+        }
+    }
+
+    /// <summary>Swaps in the downloaded launcher and restarts into it.</summary>
+    /// <returns>Whether the launcher should now exit.</returns>
+    public bool RestartIntoUpdate() => _selfUpdater.ApplyAndRestart();
+
+    /// <summary>Gets whether the first-run guide is shown: to a player who has not been through it and whose game was not found.</summary>
+    /// <remarks>A player whose game is where the launcher already looks has nothing to be guided through.</remarks>
+    public bool NeedsOnboarding =>
+        !Settings.Onboarded
+        && GameStarter.Locate(GameTitle.Igi1, Settings.GameFolders.GetValueOrDefault(GameTitle.Igi1.Id)) is null;
+
+    /// <summary>Finishes the first-run guide: keeps the folder and channel chosen, and starts the install if asked.</summary>
+    /// <param name="gameFolder">The original game's folder, or <see langword="null"/> when the player skipped it.</param>
+    /// <param name="sequelFolder">I.G.I. 2's folder, for mods that read its data, or <see langword="null"/> when not given.</param>
+    /// <param name="channel">The update channel chosen.</param>
+    /// <param name="install">Whether to start downloading the build now.</param>
+    public void CompleteOnboarding(string? gameFolder, string? sequelFolder, ReleaseChannel channel, bool install)
+    {
+        ChangeSettings(s =>
+        {
+            s.Onboarded = true;
+            s.Channel = channel;
+            if (!string.IsNullOrWhiteSpace(gameFolder))
+            {
+                s.GameFolders[GameTitle.Igi1.Id] = gameFolder;
+            }
+
+            if (!string.IsNullOrWhiteSpace(sequelFolder))
+            {
+                s.GameFolders[GameTitle.Igi2.Id] = sequelFolder;
+            }
+        });
+
+        Selected = Games.ToList().FindIndex(static g => g.Retail == GameTitle.Igi1);
+        Recompute();
+        if (install && Current.State is GameState.NotInstalled or GameState.UpdateAvailable or GameState.Damaged)
+        {
+            StartDownload();
+        }
+    }
+
+    /// <summary>Records a settings change, saves it, and re-reads what depends on it.</summary>
+    /// <param name="change">The change.</param>
+    public void ChangeSettings(Action<LauncherSettings> change)
+    {
+        ArgumentNullException.ThrowIfNull(change);
+        ReleaseChannel channel = Settings.Channel;
+        string library = Settings.Library;
+        change(Settings);
+        try
+        {
+            Settings.Save(_settingsPath);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Report($"Settings could not be saved: {ex.Message}", ex);
+        }
+
+        // A channel the player has just chosen is shown at once: from its last answer when there is one, and
+        // asked about straight away rather than when the polling spacing next allows.
+        if (Settings.Channel != channel)
+        {
+            _feed = _feedClient.Cached(Settings.Channel, _installed?.Version);
+            Recompute();
+            if (!_checking)
+            {
+                Check();
+            }
+        }
+
+        // A different library is a different install: whatever is (or is not) installed there now counts.
+        if (!string.Equals(Settings.Library, library, StringComparison.Ordinal) && Job is null && !string.IsNullOrWhiteSpace(Settings.Library))
+        {
+            _installer = new BuildInstaller(_http, Path.Combine(Settings.Library.Trim(), "openigi"));
+            _installed = _installer.Current();
+            LoadInstalledContent();
+            CheckSoon();
+        }
+
+        Recompute();
+    }
+
+    /// <summary>Applies finished background work and starts what is due.</summary>
+    /// <param name="elapsedSeconds">The real time since the last tick.</param>
+    public void Tick(float elapsedSeconds)
+    {
+        TickServers();
+        TickInvite(elapsedSeconds);
+        TickAccount();
+        while (_results.TryDequeue(out Action? result))
+        {
+            result();
+        }
+
+        if (_running is { HasExited: true })
+        {
+            int code = _running.ExitCode;
+            _logger.Log(code == 0 ? LogLevel.Information : LogLevel.Warning, GameLogCategory, $"The game exited with code {code}.");
+            _running.Dispose();
+            _running = null;
+            Recompute();
+            if (_hiddenForGame)
+            {
+                _hiddenForGame = false;
+                ShowRequested?.Invoke(this, EventArgs.Empty);
+            }
+        }
+
+        Job?.Sample(elapsedSeconds);
+
+        // A new log line is a change the Logs page shows.
+        if (_log.Launcher.Version != _launcherLogVersion || _log.Game.Version != _gameLogVersion)
+        {
+            _launcherLogVersion = _log.Launcher.Version;
+            _gameLogVersion = _log.Game.Version;
+            Changed();
+        }
+
+        if (!_checking && DateTime.UtcNow >= _schedule.Next)
+        {
+            Check();
+        }
+    }
+
+    public void Dispose()
+    {
+        _download?.Cancel();
+        _download?.Dispose();
+        _running?.Dispose();
+        DisposeServers();
+        DisposeAccount();
+        _http.Dispose();
+    }
+
+    private void Check()
+    {
+        _checking = true;
+        _schedule.Started(DateTime.UtcNow);
+        ReleaseChannel channel = Settings.Channel;
+        string? since = _installed?.Version;
+
+        CheckContent();
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(20));
+                ChannelFeed feed = await _feedClient.FetchAsync(ReleaseFeedClient.DefaultService, channel, since, timeout.Token).ConfigureAwait(false);
+                _results.Enqueue(() =>
+                {
+                    _checking = false;
+                    _schedule.Finished(DateTime.UtcNow, succeeded: true);
+                    // The channel changed while this was being asked: ask again for the one now chosen.
+                    if (channel != Settings.Channel)
+                    {
+                        Check();
+                        return;
+                    }
+
+                    if (Problem?.StartsWith("The update service", StringComparison.Ordinal) == true)
+                    {
+                        Problem = null;
+                    }
+
+                    _feed = feed;
+                    Recompute();
+                    CleanDownloads();
+                    AnnounceGameUpdate();
+                    MaybeStartAutomatically();
+                    MaybeStageLauncher();
+                });
+            }
+            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or System.Text.Json.JsonException)
+            {
+                _results.Enqueue(() =>
+                {
+                    _checking = false;
+                    _schedule.Finished(DateTime.UtcNow, succeeded: false);
+                    int minutes = Math.Max(1, (int)Math.Round((_schedule.Next - DateTime.UtcNow).TotalMinutes));
+                    Report($"The update service cannot be reached; trying again in {minutes} minute{(minutes == 1 ? string.Empty : "s")}.", ex);
+                    Changed();
+                });
+            }
+        });
+    }
+
+    // The smaller build when this machine has the .NET runtime it needs, the self-contained one otherwise (and
+    // whenever a release has no smaller build for this platform).
+    private static ReleaseAsset? GameAsset(ReleaseManifest? release) =>
+        release is null ? null
+        : (DotnetRuntime.IsInstalled() ? release.Find(ReleaseComponent.Game, LauncherPaths.Runtime, selfContained: false) : null)
+          ?? release.Find(ReleaseComponent.Game, LauncherPaths.Runtime);
+
+    private void StartDownload()
+    {
+        // A kept build is being made current; there will be nothing to download once it is.
+        if (_switching)
+        {
+            return;
+        }
+
+        if (_latest is not { } release || GameAsset(release) is not { } asset)
+        {
+            Report(_latest is null
+                ? "No release is available yet."
+                : $"This release has no build for {LauncherPaths.Runtime}.");
+            Changed();
+            return;
+        }
+
+        string version = release.Version;
+        DownloadJob job = Job is { Paused: true } paused && paused.Version == version
+            ? paused
+            : new DownloadJob(Current, version, _installed is null ? $"Install OpenIGI {version}" : $"OpenIGI {version}", asset.Size);
+        job.Paused = false;
+        Job = job;
+        Problem = null;
+
+        _download?.Dispose();
+        _download = new CancellationTokenSource();
+        CancellationToken token = _download.Token;
+        Progress<InstallProgress> progress = new(job.Report);
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                // The build may still be on disk, kept from before (switching back from a beta finds the stable
+                // build there); then it only becomes current again.
+                InstalledBuild? kept = _installer.TryReuse(version, asset, GameStarter.ExecutableName);
+                InstalledBuild build = kept
+                    ?? await _installer.InstallAsync(version, asset, GameStarter.ExecutableName, progress, token).ConfigureAwait(false);
+                _logger.Information(
+                    InstallLogCategory,
+                    kept is null ? $"Installed OpenIGI {version}." : $"Switched back to OpenIGI {version}, which was still installed.");
+                _results.Enqueue(() =>
+                {
+                    _installed = build;
+                    _damaged = false;
+                    Job = null;
+                    CheckSoon();
+                    Recompute();
+                    MaybeStartAutomatically();
+                });
+            }
+            catch (OperationCanceledException)
+            {
+                // Paused or cancelled: the partial download stays for the resume.
+            }
+            catch (Exception ex) when (ex is HttpRequestException or IOException or InvalidDataException or UnauthorizedAccessException)
+            {
+                _results.Enqueue(() =>
+                {
+                    Job = null;
+                    Report($"The download failed: {ex.Message}", ex);
+                    Recompute();
+                });
+            }
+        });
+        Changed();
+    }
+
+    private void Play(LauncherGame game, IReadOnlyList<string>? join = null)
+    {
+        if (_installed is not { } build || game.Retail is not { } title || _running is not null)
+        {
+            return;
+        }
+
+        string? folder = GameStarter.Locate(title, Settings.GameFolders.GetValueOrDefault(title.Id));
+        if (folder is null)
+        {
+            return;
+        }
+
+        try
+        {
+            // The launcher keeps running while the game does, in the tray or not, so it always reads its log.
+            _running = GameStarter.Start(build.Folder, GameStarter.Arguments(title, folder, Settings.LaunchArguments, [.. game.LaunchSwitches, .. join ?? []]), GameEnvironment(title), followOutput: true);
+            _log.Follow(_running);
+
+            _logger.Information(GameLogCategory, $"Started {title.DisplayName} from {build.Folder} (process {_running.Id}).");
+            Problem = null;
+            if (Settings.MinimizeOnLaunch)
+            {
+                _hiddenForGame = true;
+                HideRequested?.Invoke(this, EventArgs.Empty);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            Report($"The game did not start: {ex.Message}", ex);
+        }
+
+        Recompute();
+    }
+
+    private void MaybeStartAutomatically()
+    {
+        if (!Settings.AutomaticUpdates || Job is not null || _running is not null || _installed is null || _switching)
+        {
+            return;
+        }
+
+        // The game first: a content pack may need the newer build to be read at all.
+        if (Games.Any(static g => g.State == GameState.UpdateAvailable))
+        {
+            StartDownload();
+        }
+        else if (Packs.FirstOrDefault(static p => p.State == ContentState.UpdateAvailable && p.Enabled) is { } pack)
+        {
+            InstallContent(pack.Pack.Id);
+        }
+    }
+
+    private void MaybeStageLauncher()
+    {
+        // The launcher has one channel, stable, whichever channel the games follow: it updates to the launcher
+        // of the newest stable release, never to a beta's.
+        if (!LauncherUpdater.CanUpdateSelf || _feed?.Launcher is not { } latest || _stagingLauncher == latest.Version
+            || latest.ParsedVersion <= LauncherUpdater.OwnVersion
+            || latest.Find(ReleaseComponent.Launcher, LauncherPaths.Runtime) is not { } asset)
+        {
+            return;
+        }
+
+        _stagingLauncher = latest.Version;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await _selfUpdater.StageAsync(latest.Version, asset, CancellationToken.None).ConfigureAwait(false);
+                _results.Enqueue(() =>
+                {
+                    LauncherUpdateReady = latest.Version;
+                    Announce("launcher", latest.Version, "OpenIGI Launcher update ready",
+                        $"Launcher {latest.Version} is downloaded. Restart the launcher to update it.");
+                    Changed();
+                });
+            }
+            catch (Exception ex) when (ex is HttpRequestException or IOException or InvalidDataException or UnauthorizedAccessException)
+            {
+                _logger.Warning(LogCategory, $"The launcher update could not be downloaded: {ex.Message}", ex);
+                _results.Enqueue(() => _stagingLauncher = null);
+            }
+        });
+    }
+
+    // Re-derives every game's state from the install, the feed, and what is running.
+    private void Recompute()
+    {
+        _latest = _feed?.Latest;
+        int installedMegabytes = _installed is null ? 0 : (int)(_installed.Files.Sum(static f => f.Size) / 1_000_000);
+        int downloadMegabytes = (int)((GameAsset(_latest)?.Size ?? 0) / 1_000_000);
+
+        // A build that needs the .NET runtime cannot start once the runtime is gone: repairing it fetches the
+        // self-contained one.
+        bool runtimeGone = _installed is { SelfContained: false } && !DotnetRuntime.IsInstalled();
+        bool newer = _latest is not null && (_installed is null || _latest.ParsedVersion > ReleaseVersion.Parse(_installed.Version));
+
+        // A beta build kept after switching to stable is not on the line the player chose. Its version is
+        // higher than stable's newest, so "newer" alone would leave it in place and show it as current; the
+        // stable build is offered in its place instead, as leaving a beta does everywhere else.
+        bool leftBeta = _latest is not null
+            && _installed is not null
+            && Settings.Channel == ReleaseChannel.Stable
+            && ReleaseVersion.Parse(_installed.Version).IsPrerelease
+            && _latest.ParsedVersion != ReleaseVersion.Parse(_installed.Version);
+
+        // A build on offer that is still on disk is switched to rather than offered: the game stays READY.
+        if (newer || leftBeta)
+        {
+            UseKeptBuild();
+        }
+
+        foreach (LauncherGame game in Games)
+        {
+            if (!game.Released || game.Retail is not { } title)
+            {
+                game.State = GameState.Unavailable;
+                continue;
+            }
+
+            game.Version = _installed?.Version ?? string.Empty;
+            game.LatestVersion = _latest?.Version ?? game.Version;
+            game.SizeMegabytes = _installed is null ? downloadMegabytes : installedMegabytes;
+            game.UpdateMegabytes = downloadMegabytes;
+            game.Notes = BuildNotes();
+            game.NotesUrl = _latest is null ? null : $"https://github.com/OpenIGI/OpenIGI/releases/tag/v{_latest.Version}";
+            game.OptionalPacks = [.. Packs.Where(p => p.Pack.Game == title.Id).Select(static p => p.Pack.Title)];
+            game.PacksInstalled = Packs.Count(p => p.Pack.Game == title.Id && p.Installed is not null);
+            game.State = _running is not null ? GameState.Playing
+                : _installed is null ? GameState.NotInstalled
+                : _damaged || runtimeGone ? GameState.Damaged
+                : (newer || leftBeta) && !_switching ? GameState.UpdateAvailable
+                : GameStarter.Locate(title, Settings.GameFolders.GetValueOrDefault(title.Id)) is null ? GameState.NeedsGameFolder
+                : GameState.Ready;
+        }
+
+        RecomputeContent();
+        Changed();
+    }
+
+    // Once the channel's newest release is known, every other download is stale: kept are only that release's
+    // download and partial, so an interrupted download still resumes. Not while one is running or paused,
+    // which may be for a release the feed has since moved past.
+    private void CleanDownloads()
+    {
+        if (Job is not null)
+        {
+            return;
+        }
+
+        string? keep = GameAsset(_latest)?.Name;
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                long freed = _installer.CleanDownloads(keep);
+                if (freed > 0)
+                {
+                    _logger.Information(InstallLogCategory, $"Removed stale downloads: {FormatSize(freed / 1_000_000.0)} freed.");
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                _logger.Debug(InstallLogCategory, $"Stale downloads could not be removed: {ex.Message}");
+            }
+        });
+    }
+
+    // The build the channel offers is often still on disk: the installer keeps the one an install replaced,
+    // so changing channel and back finds it there. It is made current in place of an update, and the game
+    // reads READY to play at once. Its files are hashed off the frame loop; a kept build found changed is
+    // left alone, and then the main button offers it as an ordinary download.
+    private void UseKeptBuild()
+    {
+        if (_switching || Job is not null || _running is not null
+            || _latest is not { } latest || latest.Version == _notReusable
+            || GameAsset(latest) is not { } asset || !_installer.IsKept(latest.Version))
+        {
+            return;
+        }
+
+        _switching = true;
+        string version = latest.Version;
+        _ = Task.Run(() =>
+        {
+            InstalledBuild? build = null;
+            try
+            {
+                build = _installer.TryReuse(version, asset, GameStarter.ExecutableName);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                _logger.Warning(InstallLogCategory, $"OpenIGI {version} is still on disk but could not be used: {ex.Message}", ex);
+            }
+
+            _results.Enqueue(() =>
+            {
+                _switching = false;
+                if (build is null)
+                {
+                    _notReusable = version;
+                    Recompute();
+                    return;
+                }
+
+                _logger.Information(InstallLogCategory, $"Switched to OpenIGI {version}, which was still installed.");
+                _installed = build;
+                _damaged = false;
+                Recompute();
+            });
+        });
+    }
+
+    // The changes the player is about to receive (every release since theirs, newest first), or the newest
+    // release's own when they are up to date.
+    private PatchNotes? BuildNotes()
+    {
+        if (_latest is not { } latest)
+        {
+            return null;
+        }
+
+        IReadOnlyList<ReleaseManifest> releases = _feed!.Releases.Count > 0 ? _feed.Releases : [latest];
+        List<PatchNote> items = [];
+        foreach (ReleaseManifest release in releases)
+        {
+            foreach (ReleaseNoteSection section in release.Notes)
+            {
+                PatchNoteKind kind = section.Title switch
+                {
+                    "New" => PatchNoteKind.New,
+                    "Fixes" => PatchNoteKind.Fix,
+                    _ => PatchNoteKind.Change,
+                };
+                items.AddRange(section.Entries.Select(entry => new PatchNote(kind, entry.Text)));
+            }
+        }
+
+        // New things first, then fixes, then the rest: the card shows only the first few.
+        List<PatchNote> shown = [.. items.OrderBy(static n => n.Kind switch { PatchNoteKind.New => 0, PatchNoteKind.Fix => 1, _ => 2 }).Take(NotesShown)];
+        if (shown.Count == 0)
+        {
+            shown.Add(new PatchNote(PatchNoteKind.Change, "Maintenance release"));
+        }
+
+        string title = (latest.Channel == ReleaseChannel.Beta ? "BETA " : "PATCH ") + latest.Version.ToUpperInvariant();
+        string date = latest.Published.ToString("MMM yyyy", CultureInfo.InvariantCulture).ToUpperInvariant();
+        return new PatchNotes(title, date, shown);
+    }
+
+    // A game update the player has not been told about: told once, by notification if the window is not in
+    // front (if it is, the UPDATE button already says it).
+    private void AnnounceGameUpdate()
+    {
+        // Only a release that is newer: the stable build offered after leaving the beta is the player's own
+        // doing, not news.
+        if (_latest is { } latest
+            && (_installed is null || latest.ParsedVersion > ReleaseVersion.Parse(_installed.Version))
+            && !_switching
+            && Games.Any(static g => g.State == GameState.UpdateAvailable))
+        {
+            Announce("game", latest.Version, $"OpenIGI {latest.Version} is out",
+                Settings.AutomaticUpdates && _running is null
+                    ? "Downloading it now; it will be ready to play when the launcher says so."
+                    : "Open the launcher to update.");
+        }
+    }
+
+    private void Announce(string key, string version, string title, string message)
+    {
+        if (!UpdateNotices.ShouldAnnounce(Settings, key, version))
+        {
+            return;
+        }
+
+        try
+        {
+            Settings.Save(_settingsPath);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Not remembered: at worst the same release is announced again after a restart.
+            _logger.Debug(LogCategory, $"The announced release could not be remembered: {ex.Message}");
+        }
+
+        if (!WindowFocused)
+        {
+            Notify?.Invoke(title, message);
+        }
+    }
+
+    private void Changed() => Revision++;
+
+    // What the footer shows is also what the log keeps: a failure with its exception, anything else as it was said.
+    private void Report(string problem, Exception? exception = null)
+    {
+        Problem = problem;
+        _logger.Log(exception is null ? LogLevel.Information : LogLevel.Warning, LogCategory, problem, exception);
+    }
+
+    private void Open(string target)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo(target) { UseShellExecute = true })?.Dispose();
+        }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
+        {
+            // Nothing registered to open it; there is nothing more the launcher can do.
+            _logger.Warning(LogCategory, $"'{target}' could not be opened: {ex.Message}");
+        }
+    }
+}
+
+/// <summary>A download of a build, as the home page and the footer show it.</summary>
+internal sealed class DownloadJob(LauncherGame game, string version, string label, long bytes)
+{
+    private long _total = bytes;
+    private long _done;
+    private int _stage;
+    private long _lastDone;
+    private float _window;
+
+    public LauncherGame Game { get; } = game;
+
+    public string Version { get; } = version;
+
+    public string Label { get; } = label;
+
+    /// <summary>Gets the content pack this job installs, or <see langword="null"/> for the game's build.</summary>
+    public string? ContentId { get; init; }
+
+    /// <summary>Gets what the job downloads, in megabytes: the archive, or the chunks a pack lacks.</summary>
+    public float Size => Interlocked.Read(ref _total) / 1_000_000f;
+
+    /// <summary>Gets how much has arrived, in megabytes.</summary>
+    public float Done => Interlocked.Read(ref _done) / 1_000_000f;
+
+    /// <summary>Gets the recent download speed, in megabytes a second.</summary>
+    public float Speed { get; private set; }
+
+    public bool Paused { get; set; }
+
+    /// <summary>Gets what the install is doing now.</summary>
+    public InstallStage Stage => (InstallStage)Volatile.Read(ref _stage);
+
+    public float Progress => Size <= 0f ? 1f : Math.Clamp(Done / Size, 0f, 1f);
+
+    /// <summary>Whether this download covers a game: both titles share one build.</summary>
+    /// <param name="other">The game.</param>
+    /// <returns>Whether its progress belongs on that game's page.</returns>
+    public bool Covers(LauncherGame other) => ContentId is null && other.Retail is not null && Game.Retail is not null;
+
+    /// <summary>Takes a progress report from the installer, on whichever thread it arrives.</summary>
+    /// <param name="progress">The report.</param>
+    public void Report(InstallProgress progress)
+    {
+        Interlocked.Exchange(ref _done, progress.Done);
+        Interlocked.Exchange(ref _total, progress.Total);
+        Volatile.Write(ref _stage, (int)progress.Stage);
+    }
+
+    /// <summary>Updates the speed from what arrived since the last frame, smoothed over about a second.</summary>
+    /// <param name="elapsedSeconds">The frame time.</param>
+    public void Sample(float elapsedSeconds)
+    {
+        _window += elapsedSeconds;
+        if (_window < 0.5f)
+        {
+            return;
+        }
+
+        long done = Interlocked.Read(ref _done);
+        float instant = (done - _lastDone) / 1_000_000f / _window;
+        Speed = Speed <= 0f ? instant : (Speed * 0.6f) + (instant * 0.4f);
+        _lastDone = done;
+        _window = 0f;
+    }
+}

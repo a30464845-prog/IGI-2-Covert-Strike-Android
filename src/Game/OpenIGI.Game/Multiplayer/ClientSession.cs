@@ -1,0 +1,910 @@
+﻿using OpenIGI.Net;
+using OpenIGI.Net.Identity;
+
+namespace OpenIGI.Game.Multiplayer;
+
+/// <summary>The client's side of a session: snapshots read and kept for drawing, and the player's commands sent up.</summary>
+/// <remarks>
+/// <para>
+/// Each snapshot that arrives is read against the one it names (which this client acknowledged earlier), kept for the
+/// next, handed to <see cref="Remote"/> for drawing the other humans, and used to set the clock. The next command
+/// packet acknowledges it, so the server writes the next against it.
+/// </para>
+/// <para>
+/// Commands go up once a tick, stamped with the tick the server should run them on (<see cref="TickClockSync.CommandTick"/>);
+/// each packet repeats the newest <see cref="CommandRedundancy"/>, so a packet or two lost costs nothing. The commands sent
+/// are kept in <see cref="SentCommands"/>, which prediction runs again over a correction from the server.
+/// </para>
+/// </remarks>
+public sealed class ClientSession
+{
+    private const int KeptCommands = 64;
+
+    private readonly NetClient _net;
+    private readonly UserCommandCodec _codec;
+    private readonly BitWriter _writer = new(512);
+    private readonly List<UserCommand> _sent = [];
+    private long _newestReceived = -1;
+    private readonly Dictionary<long, Snapshot?[]> _parts = [];
+
+    /// <summary>Initializes a new instance of the <see cref="ClientSession"/> class.</summary>
+    /// <param name="net">The client's network end; the session reads its events, so nothing else should.</param>
+    /// <param name="channelCount">The title's channel frame length.</param>
+    /// <param name="identity">
+    /// Who the player is, which signs the server's challenge; <see langword="null"/> takes <see cref="PlayerIdentities.Default"/>,
+    /// or one made for this session where the game set none.
+    /// </param>
+    /// <param name="protocolId">The protocol the session plays, which the proof names.</param>
+    public ClientSession(NetClient net, int channelCount, IPlayerIdentity? identity = null, ulong protocolId = 0)
+    {
+        _net = net ?? throw new ArgumentNullException(nameof(net));
+        _codec = new UserCommandCodec(channelCount);
+        _identity = identity ?? PlayerIdentities.Default ?? (EcdsaPlayerIdentity.IsSupported ? EcdsaPlayerIdentity.CreateEphemeral() : null);
+        _protocolId = protocolId;
+    }
+
+    private readonly IPlayerIdentity? _identity;
+    private readonly ulong _protocolId;
+
+    // The server's challenge, until its proof has gone, and the signing of it while that runs.
+    private byte[]? _challenge;
+    private Task<byte[]>? _signing;
+
+    /// <summary>Gets the entity id of this client's own human, once welcomed.</summary>
+    public int? EntityId { get; private set; }
+
+    /// <summary>Gets the kills of late the server has told of, stamped with the receiving clock.</summary>
+    public Modes.KillFeed Feed { get; } = new();
+
+    /// <summary>Gets the server's ticks per second, once welcomed.</summary>
+    public int TickRate { get; private set; }
+
+    /// <summary>Gets the map the server plays, once welcomed.</summary>
+    public string? Map { get; private set; }
+
+    /// <summary>Gets the mode the server plays, once welcomed, or <see langword="null"/>.</summary>
+    public string? ServerMode { get; private set; }
+
+    /// <summary>Has the map loaded again, as the server's Travel to it does: for a level brought up under the wrong mode.</summary>
+    public void ReloadMap()
+    {
+        if (Map is { Length: > 0 } map)
+        {
+            _travel = map;
+        }
+    }
+
+    /// <summary>Gets which of the server's levels this client is on, counted on at each travel.</summary>
+    public byte Epoch { get; private set; }
+
+    private string? _travel;
+
+    // The level the server said it is going on to, and which announcement it was: loaded here at once, and begun only on
+    // the server's Travel to it.
+    private string? _going;
+    private byte _goingId;
+
+    /// <summary>Gets whether a level the server is going on to is loaded or loading here, waiting for the server to begin it.</summary>
+    public bool WaitingForServer => _going is not null;
+
+    /// <summary>Gets whether the server has begun a level this client has still to load, its snapshots not for the one here.</summary>
+    /// <remarks>
+    /// A restart, or a level gone on to unannounced: until the client is there, the server's soldiers would be posed on the
+    /// level being left, where the same ids are other soldiers -- a corpse there standing for a guard alive and firing.
+    /// </remarks>
+    public bool Behind { get; private set; }
+
+    /// <summary>Tells the session the level the server began is up here, so its snapshots are shown again.</summary>
+    public void Arrived() => Behind = false;
+
+    /// <summary>Tells the server the level it is going on to is loaded here.</summary>
+    public void ReportReady()
+    {
+        if (_going is null)
+        {
+            return;
+        }
+
+        _writer.Reset();
+        _writer.WriteBits((uint)SessionMessage.Ready, 8);
+        _writer.WriteBits(_goingId, 8);
+        _net.Send(NetChannel.Reliable, _writer.AsSpan());
+    }
+
+    // What the server told this client was said and marked, since it last took them.
+    private readonly List<ChatLine> _heard = [];
+    private readonly List<WorldMark> _marked = [];
+    private readonly List<VoicePacket> _voices = [];
+
+    /// <summary>Sends a moment of this player's voice to the others.</summary>
+    /// <param name="packet">The encoded voice.</param>
+    public void Speak(ReadOnlySpan<byte> packet)
+    {
+        _writer.Reset();
+        SessionTalk.WriteVoice(_writer, -1, packet);
+        _net.Send(NetChannel.Unreliable, _writer.AsSpan());
+    }
+
+    /// <summary>Takes the others' voices heard since the last call.</summary>
+    /// <returns>The moments, oldest first.</returns>
+    public IReadOnlyList<VoicePacket> TakeVoices()
+    {
+        VoicePacket[] heard = [.. _voices];
+        _voices.Clear();
+        return heard;
+    }
+
+    /// <summary>Says a line to every player, or to this player's team only.</summary>
+    /// <param name="text">The line.</param>
+    /// <param name="team">Whether only the team hears it.</param>
+    public void Say(string text, bool team = false)
+    {
+        _writer.Reset();
+        SessionTalk.WriteChat(_writer, -1, text, team ? ChatKind.Team : ChatKind.All);
+        _net.Send(NetChannel.Reliable, _writer.AsSpan());
+    }
+
+    private readonly List<CombatNote> _combat = [];
+
+    /// <summary>Takes the hits this client's player scored or took that the server told of since the last call.</summary>
+    /// <returns>The hits.</returns>
+    public IReadOnlyList<CombatNote> TakeCombat()
+    {
+        if (_combat.Count == 0)
+        {
+            return [];
+        }
+
+        CombatNote[] notes = [.. _combat];
+        _combat.Clear();
+        return notes;
+    }
+
+    // Level resets the server has told of and the client has not yet made.
+    private int _levelResets;
+
+    // Weapons the server handed this client's player and its own copy has not yet taken.
+    private readonly List<(string Weapon, int Rounds)> _given = [];
+    private readonly List<(bool Fresh, IReadOnlyList<(string Weapon, int Rounds)> Kit)> _kits = [];
+
+    /// <summary>Takes the kits the server sent for this client's player since last asked (respawns), oldest first.</summary>
+    /// <returns>Each kit, and whether it is from nothing.</returns>
+    public IReadOnlyList<(bool Fresh, IReadOnlyList<(string Weapon, int Rounds)> Kit)> TakeKits()
+    {
+        if (_kits.Count == 0)
+        {
+            return [];
+        }
+
+        (bool, IReadOnlyList<(string, int)>)[] taken = [.. _kits];
+        _kits.Clear();
+        return taken;
+    }
+
+    /// <summary>Gets how many weapons and items the server has handed this client's player, its buys and loadouts: a count that only grows.</summary>
+    public int OwnHandedOver { get; private set; }
+
+    /// <summary>Takes the weapons the server handed this client's player since the last call (its buys).</summary>
+    /// <returns>Each weapon's script id and rounds.</returns>
+    public IReadOnlyList<(string Weapon, int Rounds)> TakeGiven()
+    {
+        if (_given.Count == 0)
+        {
+            return [];
+        }
+
+        (string, int)[] taken = [.. _given];
+        _given.Clear();
+        return taken;
+    }
+
+    /// <summary>Takes whether the server put its level back since the last call: the client's copy goes back too.</summary>
+    /// <returns><see langword="true"/> once for each reset told of (several at once are one).</returns>
+    public bool TakeLevelReset()
+    {
+        bool any = _levelResets > 0;
+        _levelResets = 0;
+        return any;
+    }
+
+    /// <summary>Gets when the local player's use key went down, on the session's clock; <see langword="null"/> while it is up.</summary>
+    public double? UseHeldSince { get; private set; }
+
+    /// <summary>Gets whether the local player holds the mode's bomb in hand, or <see langword="null"/> where its title never holds one.</summary>
+    public bool? BombInHand { get; private set; }
+
+    /// <summary>Notes the local player's use key, as each command goes out.</summary>
+    /// <param name="held">Whether it is down.</param>
+    /// <param name="now">The session's clock.</param>
+    /// <param name="bombInHand">Whether the bomb is in its hand, or <see langword="null"/> where the title never holds one.</param>
+    public void NoteUse(bool held, double now, bool? bombInHand = null)
+    {
+        UseHeldSince = held ? UseHeldSince ?? now : null;
+        BombInHand = bombInHand;
+    }
+
+    /// <summary>Sends a command to the server's remote console.</summary>
+    /// <param name="password">The server's remote console password.</param>
+    /// <param name="command">The command, as its console takes it.</param>
+    public void SendRcon(string password, string command)
+    {
+        _writer.Reset();
+        _writer.WriteBits((uint)SessionMessage.Rcon, 8);
+        _writer.WriteString(password ?? string.Empty, 64);
+        _writer.WriteString(command ?? string.Empty, 256);
+        _net.Send(NetChannel.Reliable, _writer.AsSpan());
+    }
+
+    /// <summary>Takes the remote console's answers that came since the last call.</summary>
+    /// <returns>Their lines, oldest first.</returns>
+    public IReadOnlyList<string> TakeRconAnswers()
+    {
+        string[] lines = [.. _rconAnswers];
+        _rconAnswers.Clear();
+        return lines;
+    }
+
+    // The remote console's answers, waiting to be taken.
+    private readonly List<string> _rconAnswers = [];
+
+    // The server's newest list of files, and the pieces of files that came, until taken.
+    private SessionFileList? _fileList;
+    private readonly List<FilePiece> _filePieces = [];
+
+    /// <summary>Takes the list of files the server last sent, if one came since the last call.</summary>
+    /// <returns>The list, or <see langword="null"/>.</returns>
+    public SessionFileList? TakeFileList()
+    {
+        SessionFileList? list = _fileList;
+        _fileList = null;
+        return list;
+    }
+
+    /// <summary>Takes the pieces of files that came since the last call.</summary>
+    /// <returns>The pieces, in the order they came.</returns>
+    public IReadOnlyList<FilePiece> TakeFilePieces()
+    {
+        FilePiece[] pieces = [.. _filePieces];
+        _filePieces.Clear();
+        return pieces;
+    }
+
+    /// <summary>Asks the server for files of a list it sent.</summary>
+    /// <param name="map">The list's map.</param>
+    /// <param name="indices">The files, by place in the list.</param>
+    public void WantFiles(string map, IReadOnlyCollection<int> indices)
+    {
+        ArgumentNullException.ThrowIfNull(map);
+        ArgumentNullException.ThrowIfNull(indices);
+        _writer.Reset();
+        _writer.WriteBits((uint)SessionMessage.FileWant, 8);
+        _writer.WriteString(map, 64);
+        _writer.WriteVarUInt((uint)indices.Count);
+        foreach (int index in indices)
+        {
+            _writer.WriteVarUInt((uint)index);
+        }
+
+        _net.Send(NetChannel.Reliable, _writer.AsSpan());
+    }
+
+    /// <summary>Marks a place for every player.</summary>
+    /// <param name="position">Where, in world units.</param>
+    public void Mark(Int3 position)
+    {
+        _writer.Reset();
+        SessionTalk.WriteMark(_writer, -1, position);
+        _net.Send(NetChannel.Reliable, _writer.AsSpan());
+    }
+
+    /// <summary>Takes what has been said since the last call, this client's own lines included as the server echoed them.</summary>
+    /// <returns>The lines, oldest first.</returns>
+    public IReadOnlyList<ChatLine> TakeChat()
+    {
+        ChatLine[] heard = [.. _heard];
+        _heard.Clear();
+        return heard;
+    }
+
+    /// <summary>Takes what has been marked since the last call, this client's own marks included as the server echoed them.</summary>
+    /// <returns>The marks, oldest first.</returns>
+    public IReadOnlyList<WorldMark> TakeMarks()
+    {
+        WorldMark[] marked = [.. _marked];
+        _marked.Clear();
+        return marked;
+    }
+
+    /// <summary>Takes the map the server has gone on to, once, for the client to load.</summary>
+    /// <returns>The map, or <see langword="null"/> when the server has not travelled since the last call.</returns>
+    public string? TakeTravel()
+    {
+        string? travel = _travel;
+        _travel = null;
+        return travel;
+    }
+
+    /// <summary>Gets the estimate of the server's clock, once welcomed.</summary>
+    public TickClockSync? Clock { get; private set; }
+
+    /// <summary>Gets the snapshots that arrived, for drawing the other humans between them.</summary>
+    public SnapshotInterpolator Remote { get; } = new(32);
+
+    /// <summary>Gets the newest snapshot that arrived, or <see langword="null"/>.</summary>
+    public Snapshot? Latest { get; private set; }
+
+    /// <summary>Gets the newest scoreboard, or <see langword="null"/>.</summary>
+    public Scoreboard? Scoreboard { get; private set; }
+
+    /// <summary>Gets where the server's match stood when it last said, or <see langword="null"/> before it has.</summary>
+    public Modes.MatchState? MatchState { get; private set; }
+
+    /// <summary>Gets the vote for the next map as the server last told it to this player, or <see langword="null"/> while none is open.</summary>
+    public Modes.NextMapVote? MapVote { get; private set; }
+
+    /// <summary>Gets the local time <see cref="MatchState"/> arrived, from which its clock runs down here.</summary>
+    public double MatchStateAt { get; private set; }
+
+    /// <summary>Gets the server level's running state as last sent, or <see langword="null"/> before any.</summary>
+    public byte[]? Level { get; private set; }
+
+    private bool _levelTaken;
+
+    /// <summary>Gets whether the server level's running state has been taken since the last level change: the level here plays the server's scenes and counters.</summary>
+    public bool LevelTaken => _levelTaken;
+
+    /// <summary>Takes the server level's running state once each time a new one comes.</summary>
+    /// <returns>The state, or <see langword="null"/> when none has come since the last call.</returns>
+    public byte[]? TakeLevel()
+    {
+        if (_levelTaken || Level is null)
+        {
+            return null;
+        }
+
+        _levelTaken = true;
+        return Level;
+    }
+
+    /// <summary>Gets why the session ended or never started, or <see langword="null"/> while it goes on.</summary>
+    public string? EndReason { get; private set; }
+
+    /// <summary>Gets or sets how many of the newest commands each packet carries (<c>cl_cmdbackup</c>).</summary>
+    public int CommandRedundancy { get; set; } = 3;
+
+    /// <summary>Gets the newest commands sent, oldest first, for prediction to run again.</summary>
+    public IReadOnlyList<UserCommand> SentCommands => _sent;
+
+    /// <summary>Gets the newest tick whose command the server has run for this client, as of the newest snapshot.</summary>
+    public long LastRunCommandTick { get; private set; } = long.MinValue;
+
+    /// <summary>Gets how many of this client's commands the server last said were waiting to be run: its added delay, in ticks.</summary>
+    public int CommandLead { get; private set; }
+
+    /// <summary>Gets what keeps this client's own player where the server has it.</summary>
+    public PredictionReconciler Reconciler { get; private set; } = new();
+
+    /// <summary>Gets the snapshots that could not be read because their baseline was gone.</summary>
+    public long DroppedSnapshots { get; private set; }
+
+    /// <summary>Gets the snapshot parts received, for the connection readout.</summary>
+    public long SnapshotPartsReceived { get; private set; }
+
+    /// <summary>Gets the snapshots whole once their parts were in, for the connection readout.</summary>
+    public long SnapshotsAssembled { get; private set; }
+
+    /// <summary>Gets the bytes of snapshot parts received, for the connection readout.</summary>
+    public long SnapshotBytesReceived { get; private set; }
+
+    private SnapshotHistory Received { get; } = new();
+
+    /// <summary>Starts joining a server.</summary>
+    /// <param name="server">The server.</param>
+    /// <param name="request">The join request.</param>
+    /// <param name="now">The current time in seconds.</param>
+    public void Connect(NetAddress server, JoinRequest request, double now)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        EndReason = null;
+        _net.Connect(server, request.Encode(), now);
+    }
+
+    /// <summary>Reads what arrived.</summary>
+    /// <param name="now">The current time in seconds.</param>
+    public void Poll(double now) => _net.Update(now);
+
+    // Each shielded player's entity, and when its shield runs out on this clock.
+    private readonly Dictionary<int, double> _shields = [];
+
+    /// <summary>Gets how long a player's spawn protection has left, in seconds; nought when it has none.</summary>
+    /// <param name="entity">The player's entity.</param>
+    /// <param name="now">The clock, as <see cref="Receive"/> is given it.</param>
+    /// <returns>The seconds.</returns>
+    public double ShieldLeft(int entity, double now) => _shields.TryGetValue(entity, out double until) ? Math.Max(0, until - now) : 0;
+
+    /// <summary>Gets or sets the server tick, to a fraction, the others were last drawn at: what a shot made now was aimed at.</summary>
+    public double? DrawnTick { get; set; }
+
+    /// <summary>Gets or sets where every message the server delivers is kept, for a demo; <see langword="null"/> keeps none.</summary>
+    public DemoRecording? Recording { get; set; }
+
+    /// <summary>Reads what has arrived and acts on it.</summary>
+    /// <param name="now">The clock, in seconds.</param>
+    public void Receive(double now)
+    {
+        _net.Update(now);
+        while (_net.TryReceive(out NetEvent e))
+        {
+            switch (e.Kind)
+            {
+                case NetEventKind.Rejected or NetEventKind.Disconnected:
+                    EndReason = e.Reason;
+                    EntityId = null;
+                    break;
+                case NetEventKind.Message when e.Message.Data.Length > 0:
+                    Recording?.Add(now, e.Message.Channel, e.Message.Data);
+                    Read(e.Message.Data, now);
+                    break;
+            }
+        }
+
+        Prove();
+    }
+
+    // The server's challenge answered once the identity can sign it: its key and its signature, or an empty key from a game
+    // with no identity, which the server lets in as someone new.
+    private void Prove()
+    {
+        if (_challenge is not { } challenge)
+        {
+            return;
+        }
+
+        if (_identity is null || (_signing is { IsCompleted: true } && !_signing.IsCompletedSuccessfully))
+        {
+            SendProof([], []);
+            return;
+        }
+
+        if (_signing is null && _identity.IsReady)
+        {
+            _signing = _identity.SignAsync(PlayerIdentities.ProofOf(_protocolId, challenge, _net.Connection?.ChannelBinding ?? []));
+        }
+
+        if (_signing is { IsCompletedSuccessfully: true } signed)
+        {
+            SendProof(_identity.PublicKey, signed.Result);
+        }
+    }
+
+    private void SendProof(byte[] key, byte[] signature)
+    {
+        _challenge = null;
+        _signing = null;
+        _writer.Reset();
+        _writer.WriteBits((uint)SessionMessage.Proof, 8);
+        _writer.WriteVarUInt((uint)key.Length);
+        foreach (byte b in key)
+        {
+            _writer.WriteBits(b, 8);
+        }
+
+        _writer.WriteVarUInt((uint)signature.Length);
+        foreach (byte b in signature)
+        {
+            _writer.WriteBits(b, 8);
+        }
+
+        _net.Send(NetChannel.Reliable, _writer.AsSpan());
+    }
+
+    /// <summary>Gets how many command packets were held because the line to the server was full, for the connection readout.</summary>
+    public long CommandPacketsHeld { get; private set; }
+
+    // The newest tick a command packet carried, or null before the first: a packet after some were held carries every
+    // command since, as many as fit.
+    private long? _lastSentTick;
+
+    /// <summary>Makes this tick's command and sends it, once welcomed and the clock is set.</summary>
+    /// <param name="channels">The title's channel frame for this tick; copied.</param>
+    /// <param name="now">The current time in seconds.</param>
+    /// <returns>The tick the command was stamped for, or <see langword="null"/> when none was made.</returns>
+    /// <remarks>
+    /// While the line to the server is full (<see cref="NetConstants.CommandChokeBacklog"/>) the command is kept but its
+    /// packet is held: queued behind the rest it would only arrive late, and push the round trip out with it. The next
+    /// packet sent carries it, with every command since the last one sent.
+    /// </remarks>
+    public long? SendCommand(ReadOnlySpan<float> channels, double now)
+    {
+        if (Clock is not { HasSample: true } clock || _net.Connection is not { } connection)
+        {
+            return null;
+        }
+
+        // One command for each tick this client ran, numbered on from the last: the server runs exactly these, in this order,
+        // so its copy of the player goes where this one went. Only the first is placed by the clock.
+        long tick = _sent.Count > 0 ? _sent[^1].Tick + 1 : clock.CommandTick(now, connection.Statistics.RoundTripTime);
+        // What the player aimed at is what is on its screen: the moment the others were last drawn at, not the clock's now.
+        double drawn = DrawnTick ?? clock.InterpolationTick(now);
+        long viewTick = (long)Math.Floor(drawn);
+        Keep(new UserCommand(tick, channels.ToArray(), viewTick, (float)(drawn - viewTick)));
+        if (connection.Backlog > NetConstants.CommandChokeBacklog)
+        {
+            CommandPacketsHeld++;
+            return tick;
+        }
+
+        long unsent = _lastSentTick is { } last ? tick - last : 1;
+        int count = (int)Math.Clamp(Math.Max(CommandRedundancy, unsent), 1, UserCommandCodec.MaxCommandsPerPacket);
+        int first = _sent.Count - 1;
+        while (first > 0 && _sent.Count - first < count && _sent[first - 1].Tick == _sent[first].Tick - 1)
+        {
+            first--;
+        }
+
+        _writer.Reset();
+        _writer.WriteBits((uint)SessionMessage.Commands, 8);
+        _writer.WriteBits(Epoch, 8);
+        _writer.WriteBits((uint)_newestReceived, 32);
+        _writer.WriteBits((uint)(_newestReceived >> 32), 32);
+        _codec.Write(_writer, _sent.ToArray().AsSpan(first), _newestReceived);
+        _net.Send(NetChannel.Sequenced, _writer.AsSpan());
+        _lastSentTick = tick;
+        return tick;
+    }
+
+    /// <summary>Sends what is queued.</summary>
+    /// <param name="now">The current time in seconds.</param>
+    public void Flush(double now) => _net.Flush(now);
+
+    // Everything that belonged to the level the server has left: its snapshots, its clock, the commands sent for it.
+    private void ForgetLevel()
+    {
+        _sent.Clear();
+        _lastSentTick = null;
+        _parts.Clear();
+        _newestReceived = -1;
+        Received.Clear();
+        Remote.Clear();
+        Latest = null;
+        Level = null;
+        ForgetEvents();
+        _levelTaken = false;
+        LastRunCommandTick = long.MinValue;
+        CommandLead = 0;
+        Reconciler = new PredictionReconciler();
+        Clock = new TickClockSync(Math.Max(1, TickRate));
+    }
+
+    // The events the server sent that the world has not yet taken, and how many of each this client has been given in all:
+    // the server sends an event in every snapshot until one that carried it is acknowledged, and each is taken once.
+    private readonly List<ReplicatedImpact> _impacts = [];
+    private readonly List<ReplicatedSense> _senses = [];
+    private uint _impactsTaken;
+    private uint _sensesTaken;
+    private const int MostEventsWaiting = 512;
+
+    /// <summary>Takes the newest snapshot with the events that came since the last was taken; what <see cref="Latest"/> then holds has none.</summary>
+    /// <returns>The snapshot, or <see langword="null"/> before the first.</returns>
+    public Snapshot? TakeLatest()
+    {
+        Snapshot? latest = Latest;
+        if (latest is not null && (_impacts.Count > 0 || _senses.Count > 0))
+        {
+            _impacts.Clear();
+            _senses.Clear();
+            Latest = latest with { Impacts = null, Senses = null };
+        }
+
+        return latest;
+    }
+
+    private void ForgetEvents()
+    {
+        _impacts.Clear();
+        _senses.Clear();
+        _impactsTaken = 0;
+        _sensesTaken = 0;
+    }
+
+    // The events of a snapshot this client was not given before, by their numbers, kept for the world to take.
+    private static void Gather<T>(T[]? events, uint first, ref uint taken, List<T> waiting)
+    {
+        for (int i = 0; i < (events?.Length ?? 0); i++)
+        {
+            uint number = unchecked(first + (uint)i);
+            if (unchecked((int)(number - taken)) >= 0)
+            {
+                waiting.Add(events![i]);
+                taken = unchecked(number + 1);
+            }
+        }
+
+        if (waiting.Count > MostEventsWaiting)
+        {
+            waiting.RemoveRange(0, waiting.Count - MostEventsWaiting);
+        }
+    }
+
+    private void Keep(UserCommand command)
+    {
+        _sent.Add(command);
+        if (_sent.Count > KeptCommands)
+        {
+            _sent.RemoveAt(0);
+        }
+    }
+
+    // The parts of a split snapshot, gathered by tick: the whole once the last arrives, nothing before. A tick that never
+    // completes is dropped when a newer one does, as a lost unsplit snapshot is. The first part carries the doors and the
+    // events; the rest only humans.
+    private const int MostTicksGathering = 8;
+
+    private Snapshot? Assemble(Snapshot piece, int part, int parts)
+    {
+        if (parts == 1)
+        {
+            return piece;
+        }
+
+        if (piece.Tick <= _newestReceived)
+        {
+            return null;
+        }
+
+        if (!_parts.TryGetValue(piece.Tick, out Snapshot?[]? gathered) || gathered.Length != parts)
+        {
+            gathered = new Snapshot?[parts];
+            _parts[piece.Tick] = gathered;
+
+            // A line that loses a part of every tick completes none, and nothing else lets the gathered ones go.
+            while (_parts.Count > MostTicksGathering)
+            {
+                _parts.Remove(_parts.Keys.Min());
+            }
+        }
+
+        gathered[part] = piece;
+        if (gathered.Any(static p => p is null))
+        {
+            return null;
+        }
+
+        _parts.Remove(piece.Tick);
+        foreach (long stale in _parts.Keys.Where(t => t < piece.Tick).ToArray())
+        {
+            _parts.Remove(stale);
+        }
+
+        Snapshot first = gathered[0]!;
+        return new Snapshot(piece.Tick, [.. gathered.SelectMany(static p => p!.Humans)], first.Doors, first.Impacts, first.Senses, first.Lifts, first.Cameras, first.Wrecks, first.Projectiles, first.Tasks, first.ImpactSequence, first.SenseSequence, first.Fired, first.Vehicles);
+    }
+
+    private void Read(byte[] data, double now)
+    {
+        BitReader reader = new(data);
+        switch ((SessionMessage)reader.ReadBits(8))
+        {
+            case SessionMessage.Prove:
+                byte[] challenge = new byte[PlayerIdentities.ChallengeSize];
+                for (int i = 0; i < challenge.Length; i++)
+                {
+                    challenge[i] = (byte)reader.ReadBits(8);
+                }
+
+                if (!reader.IsOverflowed)
+                {
+                    _challenge = challenge;
+                    _signing = null;
+                }
+
+                break;
+            case SessionMessage.Welcome:
+                EntityId = (int)reader.ReadVarUInt();
+                TickRate = (int)reader.ReadVarUInt();
+                Map = reader.ReadString(64);
+                Epoch = (byte)reader.ReadBits(8);
+                ServerMode = reader.ReadString(16);
+                ForgetEvents();
+                Clock = new TickClockSync(Math.Max(1, TickRate));
+                break;
+            case SessionMessage.Chat when SessionTalk.ReadChat(ref reader) is { } line:
+                _heard.Add(line);
+                break;
+            case SessionMessage.Mark when SessionTalk.ReadMark(ref reader) is { } mark:
+                _marked.Add(mark);
+                break;
+            case SessionMessage.Voice when SessionTalk.ReadVoice(ref reader) is { } voice:
+                _voices.Add(voice);
+                break;
+            case SessionMessage.Going:
+                _goingId = (byte)reader.ReadBits(8);
+                string going = reader.ReadString(64);
+                if (!reader.IsOverflowed)
+                {
+                    _going = going;
+                    _travel = going;
+                }
+
+                break;
+            case SessionMessage.Travel:
+                Epoch = (byte)reader.ReadBits(8);
+                EntityId = (int)reader.ReadVarUInt();
+                Map = reader.ReadString(64);
+                ForgetLevel();
+
+                // The level announced and loaded already is begun now, not loaded again; any other is gone to.
+                if (_going == Map)
+                {
+                    _going = null;
+                }
+                else
+                {
+                    _going = null;
+                    _travel = Map;
+                    Behind = true;
+                }
+
+                break;
+            case SessionMessage.Scoreboard:
+                Scoreboard = Multiplayer.Scoreboard.Read(ref reader) ?? Scoreboard;
+                break;
+            case SessionMessage.LevelReset:
+                _levelResets++;
+                break;
+            case SessionMessage.Given:
+                string weapon = reader.ReadString(64);
+                int rounds = (int)reader.ReadVarUInt();
+                if (!reader.IsOverflowed && _given.Count < 32)
+                {
+                    _given.Add((weapon, rounds));
+                    OwnHandedOver++;
+                }
+
+                break;
+            case SessionMessage.Kit:
+                bool fresh = reader.ReadBool();
+                int count = (int)Math.Min(reader.ReadVarUInt(), ServerSession.MaxKit);
+                List<(string, int)> kit = new(count);
+                for (int i = 0; i < count; i++)
+                {
+                    kit.Add((reader.ReadString(64), (int)reader.ReadVarUInt()));
+                }
+
+                if (!reader.IsOverflowed && _kits.Count < 8)
+                {
+                    _kits.Add((fresh, kit));
+                }
+
+                break;
+            case SessionMessage.Combat when CombatNote.Read(ref reader) is { } hit:
+                _combat.Add(hit);
+                if (_combat.Count > 64)
+                {
+                    _combat.RemoveAt(0);
+                }
+
+                break;
+            case SessionMessage.Files when SessionFileList.Read(ref reader) is { } list:
+                _fileList = list;
+                break;
+            case SessionMessage.FilePart:
+                string pieceMap = reader.ReadString(64);
+                int pieceIndex = (int)reader.ReadVarUInt();
+                long pieceOffset = reader.ReadVarUInt();
+                byte[] pieceData = reader.ReadBytes(ServerSession.FilePieceSize);
+                if (!reader.IsOverflowed && _filePieces.Count < 4096)
+                {
+                    _filePieces.Add(new FilePiece(pieceMap, pieceIndex, pieceOffset, pieceData));
+                }
+
+                break;
+            case SessionMessage.Rcon:
+                int lines = (int)reader.ReadBits(8);
+                for (int i = 0; i < lines && !reader.IsOverflowed; i++)
+                {
+                    _rconAnswers.Add(reader.ReadString(200));
+                }
+
+                break;
+            case SessionMessage.Shields when ShieldState.Read(ref reader) is { } shields:
+                // Who spawn protection shields now, each until its ticks run out -- or until the next word, which ends it sooner.
+                _shields.Clear();
+                foreach (ShieldState shield in shields)
+                {
+                    _shields[shield.Entity] = now + (shield.TicksLeft / (double)Math.Max(1, TickRate));
+                }
+
+                break;
+            case SessionMessage.KillNote:
+                Modes.KillNote note = Modes.KillNote.Read(ref reader);
+                if (!reader.IsOverflowed)
+                {
+                    Feed.Add(note, now);
+                }
+
+                break;
+            case SessionMessage.MapVote:
+                Modes.NextMapVote? vote = Modes.NextMapVote.Read(ref reader);
+                if (!reader.IsOverflowed)
+                {
+                    MapVote = vote;
+                }
+
+                break;
+            case SessionMessage.MatchState:
+                Modes.MatchState state = Modes.MatchFlow.Read(ref reader);
+                if (!reader.IsOverflowed)
+                {
+                    MatchState = state;
+                    MatchStateAt = now;
+                }
+
+                break;
+            case SessionMessage.Level:
+                uint length = reader.ReadVarUInt();
+                if (length <= NetConstants.MaxReliableMessageSize)
+                {
+                    byte[] level = new byte[length];
+                    for (int i = 0; i < level.Length; i++)
+                    {
+                        level[i] = (byte)reader.ReadBits(8);
+                    }
+
+                    if (!reader.IsOverflowed)
+                    {
+                        Level = level;
+                        _levelTaken = false;
+                    }
+                }
+
+                break;
+            case SessionMessage.Snapshot when Clock is { } clock:
+                int part = (int)reader.ReadBits(8);
+                int parts = (int)reader.ReadBits(8);
+                if (reader.ReadBits(8) != Epoch)
+                {
+                    return;
+                }
+
+                if (!SnapshotCodec.Read(ref reader, Received.Get, out Snapshot? piece) || piece is null || parts < 1 || part >= parts)
+                {
+                    DroppedSnapshots++;
+                    return;
+                }
+
+                long ran = reader.ReadBits(32) | ((long)reader.ReadBits(32) << 32);
+                short lead = (short)(ushort)reader.ReadBits(16);
+                SnapshotPartsReceived++;
+                SnapshotBytesReceived += data.Length;
+                if (Assemble(piece, part, parts) is not { } snapshot)
+                {
+                    return;
+                }
+
+                SnapshotsAssembled++;
+
+                Received.Add(snapshot);
+                Remote.Add(snapshot);
+                if (snapshot.Tick > _newestReceived)
+                {
+                    _newestReceived = snapshot.Tick;
+                    Gather(snapshot.Impacts, snapshot.ImpactSequence, ref _impactsTaken, _impacts);
+                    Gather(snapshot.Senses, snapshot.SenseSequence, ref _sensesTaken, _senses);
+                    Latest = snapshot with
+                    {
+                        Impacts = _impacts.Count == 0 ? null : [.. _impacts],
+                        Senses = _senses.Count == 0 ? null : [.. _senses],
+                    };
+                    LastRunCommandTick = reader.IsOverflowed ? long.MinValue : ran;
+                    clock.AddSample(snapshot.Tick, now, _net.Connection?.Statistics.RoundTripTime ?? 0);
+                    if (!reader.IsOverflowed && lead != short.MinValue)
+                    {
+                        CommandLead = lead;
+                    }
+                }
+
+                break;
+        }
+    }
+}

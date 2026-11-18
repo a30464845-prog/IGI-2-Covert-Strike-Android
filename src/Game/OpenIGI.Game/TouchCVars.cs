@@ -1,0 +1,94 @@
+using OpenIGI.Core.Configuration;
+
+namespace OpenIGI.Game;
+
+/// <summary>A touch screen's own settings: the gyroscope aim a phone offers on top of the touch controls.</summary>
+/// <remarks>
+/// <para>
+/// Not <c>g_</c>: the Gameplay page builds itself from that prefix on every platform, and these do nothing without a touch
+/// screen. The Controls page shows them under Touch once the screen has been touched.
+/// </para>
+/// <para>
+/// Presentation of the player's own input only, like a mouse's sensitivity: the gyroscope turns the view by mouse counts, so
+/// nothing the simulation records is reached any other way.
+/// </para>
+/// </remarks>
+[CVarContainer]
+public static class TouchCVars
+{
+    /// <summary>When turning the phone turns the view.</summary>
+    /// <remarks>
+    /// Always by default, as a phone shooter's aim is: the swipe still turns the view as well, and a player lying down or
+    /// on a bus turns it off. Nothing asks for the sensors until a touch screen is in use, so a desktop never does.
+    /// </remarks>
+    public static readonly EnumCVar<GyroAim> Gyro = CVar.Choice(
+        "touch_gyro",
+        GyroAim.Always,
+        CVarOptions.Archive,
+        "When turning the phone turns the view: off, scope (through a sight or the binoculars) or always.");
+
+    /// <summary>How far the view turns for a turn of the phone: one turns it as far as the phone turned.</summary>
+    public static readonly NumericCVar<float> GyroSensitivity = CVar.Float(
+        "touch_gyro_sensitivity",
+        1f,
+        0.2f,
+        4f,
+        CVarOptions.Archive,
+        "How far the view turns for a turn of the phone. 1 turns it as far as the phone turned.");
+
+    /// <summary>Whether tilting the phone's top away looks down rather than up.</summary>
+    public static readonly BoolCVar GyroInvert = CVar.Bool(
+        "touch_gyro_invert",
+        false,
+        CVarOptions.Archive,
+        "Tilting the top of the phone away looks down instead of up.");
+
+    /// <summary>How far the view turns for a finger's drag, against the shipped rate.</summary>
+    public static readonly NumericCVar<float> LookSensitivity = CVar.Float(
+        "touch_look_sensitivity",
+        1f,
+        0.2f,
+        4f,
+        CVarOptions.Archive,
+        "How far the view turns for a drag across the screen. 1 is the shipped rate.");
+
+    /// <summary>Which of the player's three layouts the touch screen is laid out by.</summary>
+    public static readonly NumericCVar<int> Layout = CVar.Int(
+        "touch_layout",
+        1,
+        1,
+        LayoutSlots,
+        CVarOptions.Archive,
+        "Which of the three saved layouts the touch controls and the display's readouts stand by.");
+
+    /// <summary>The three saved layouts, as text (the layout editor writes them); empty is the shipped layout.</summary>
+    public static readonly StringCVar[] Layouts =
+    [
+        CVar.Text("touch_layout_1", string.Empty, CVarOptions.Archive, "The first saved touch layout, as the layout editor wrote it. Empty is the shipped layout."),
+        CVar.Text("touch_layout_2", string.Empty, CVarOptions.Archive, "The second saved touch layout. Empty is the shipped layout."),
+        CVar.Text("touch_layout_3", string.Empty, CVarOptions.Archive, "The third saved touch layout. Empty is the shipped layout."),
+    ];
+
+    /// <summary>Whether the mouse is read as a finger, to try the touch controls and their editor at a desk.</summary>
+    public static readonly BoolCVar Emulate = CVar.Bool(
+        "touch_emulate",
+        false,
+        CVarOptions.None,
+        "Reads the left mouse button as a finger on a touch screen, for trying the touch controls without one.");
+
+    /// <summary>How many layouts a player keeps.</summary>
+    public const int LayoutSlots = 3;
+}
+
+/// <summary>When the gyroscope aims.</summary>
+public enum GyroAim
+{
+    /// <summary>Never: the view turns by the fingers alone.</summary>
+    Off,
+
+    /// <summary>Through a sight or the binoculars, where small corrections matter most.</summary>
+    Scope,
+
+    /// <summary>Always, alongside the fingers.</summary>
+    Always,
+}

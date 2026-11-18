@@ -1,0 +1,335 @@
+using OpenIGI.Core.Graphics;
+using OpenIGI.UI.Animation;
+using OpenIGI.UI.Focus;
+using OpenIGI.UI.Layout;
+
+namespace OpenIGI.UI.Widgets;
+
+/// <summary>A segmented control: a row of tabs in a glass tray, with an amber block that slides to the selected one.</summary>
+/// <remarks>
+/// One focusable control for the whole row: left and right move between tabs while it holds focus, and
+/// the accent block springs across to the selection rather than jumping. Each tab additionally owns a
+/// rectangle of the strip, resolved at layout time, so a pointer can hover and click <em>a</em> tab rather
+/// than the strip as a whole — without that, clicking Graphics or Audio only ever re-activated whichever
+/// tab was already current. The screen listens to <see cref="SelectionChanged"/> and swaps the panel
+/// beneath. It is the spine of the settings screen's Graphics / Display / Audio / Controls / Gameplay
+/// categories.
+/// </remarks>
+public class TabStrip : Control
+{
+    private readonly List<string> _tabs;
+    private readonly Spring _indicator = new(0f, smoothTime: 0.08f);
+    private readonly Spring _indicatorWidth = new(0f, smoothTime: 0.08f);
+    private readonly Dictionary<string, string> _upper = new(StringComparer.Ordinal);
+    private int _selected;
+    private int _hovered = -1;
+
+    // The tab the block starts on when the strip is first laid out, or null for the selected one; see SlideFrom.
+    private int? _slideFrom;
+
+    // Per-tab geometry resolved during Arrange, so hit testing does not depend on a draw having happened.
+    private UiRect[] _tabRects = [];
+    private float[] _tabCenters = [];
+    private float[] _tabWidths = [];
+
+    /// <summary>Initializes a new instance of the <see cref="TabStrip"/> class.</summary>
+    /// <param name="theme">The theme to draw from.</param>
+    /// <param name="tabs">The tab captions.</param>
+    /// <exception cref="ArgumentNullException">An argument is <see langword="null"/>.</exception>
+    public TabStrip(UiTheme theme, IEnumerable<string> tabs)
+        : base(theme)
+    {
+        ArgumentNullException.ThrowIfNull(tabs);
+        _tabs = [.. tabs];
+    }
+
+    /// <summary>Raised when the selected tab changes, with the new index.</summary>
+    public event Action<int>? SelectionChanged;
+
+    /// <summary>Gets or sets the gap between segments, and between the segments and the tray, in design units.</summary>
+    public float Spacing { get; set; } = 4f;
+
+    /// <summary>
+    /// Gets or sets a small monospaced note after each tab's caption -- a count, or what the tab is for -- by index; an
+    /// empty or missing entry shows none.
+    /// </summary>
+    public IReadOnlyList<string>? Notes { get; set; }
+
+    /// <summary>Gets or sets the horizontal padding either side of each segment's caption, in design units.</summary>
+    public float TabPadding { get; set; } = 28f;
+
+    /// <summary>Gets or sets a segment's height, in design units.</summary>
+    public float SegmentHeight { get; set; } = 44f;
+
+    /// <summary>Gets or sets the captions' size, in design units; zero for the theme's label size.</summary>
+    public float TextSize { get; set; }
+
+    /// <summary>Gets or sets a value indicating whether the dark tray and its hairline are drawn behind the segments.</summary>
+    /// <remarks>Off for a strip that sits on a panel of its own, where the block and the captions are enough.</remarks>
+    public bool ShowTray { get; set; } = true;
+
+    /// <summary>Gets or sets a value indicating whether the segments share the whole width given, each the same.</summary>
+    /// <remarks>On a narrow page the strip is the page's width, and five segments a thumb wide beat five as wide as their words.</remarks>
+    public bool Stretch { get; set; }
+
+    private float CaptionTracking => Theme.Large ? 0.12f : Theme.LabelTracking;
+
+    /// <summary>Starts the block on another tab, so it slides from there to the selected one when the strip first shows.</summary>
+    /// <param name="index">The tab the selection was on before.</param>
+    /// <remarks>
+    /// For a strip built anew by a page that rebuilds itself when the selection changes: the new strip is told where the
+    /// old one's block stood, and the slide plays across the rebuild as it does inside one strip.
+    /// </remarks>
+    public void SlideFrom(int index)
+    {
+        if (index >= 0 && index < _tabs.Count)
+        {
+            _slideFrom = index;
+        }
+    }
+
+    /// <summary>Gets the tab captions.</summary>
+    public IReadOnlyList<string> Tabs => _tabs;
+
+    /// <summary>Gets or sets the selected tab index.</summary>
+    public int SelectedIndex
+    {
+        get => _selected;
+        set
+        {
+            if (_tabs.Count == 0)
+            {
+                return;
+            }
+
+            int clamped = Math.Clamp(value, 0, _tabs.Count - 1);
+            if (clamped == _selected)
+            {
+                return;
+            }
+
+            _selected = clamped;
+            SelectionChanged?.Invoke(_selected);
+        }
+    }
+
+    /// <summary>Gets the rectangle a tab occupies, valid after the strip has been arranged.</summary>
+    /// <param name="index">The tab index.</param>
+    /// <returns>The tab's hit rectangle, or <see cref="UiRect.Empty"/> when the index is not a tab.</returns>
+    public UiRect RectOf(int index) =>
+        index >= 0 && index < _tabRects.Length ? _tabRects[index] : UiRect.Empty;
+
+    /// <summary>Gets the index of the tab under a point, or -1 when the point is over none.</summary>
+    /// <param name="point">The point in pixels.</param>
+    /// <returns>The tab index, or -1.</returns>
+    public int IndexAt(UiVec2 point)
+    {
+        for (int i = 0; i < _tabRects.Length; i++)
+        {
+            if (_tabRects[i].Contains(point))
+            {
+                return i;
+            }
+        }
+
+        return -1;
+    }
+
+    /// <inheritdoc/>
+    public override bool HandleNavigate(NavDirection direction)
+    {
+        switch (direction)
+        {
+            case NavDirection.Left when _selected > 0:
+                SelectedIndex = _selected - 1;
+                return true;
+            case NavDirection.Right when _selected < _tabs.Count - 1:
+                SelectedIndex = _selected + 1;
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    /// <inheritdoc/>
+    public override void ActivateAt(UiVec2 point)
+    {
+        int index = IndexAt(point);
+        if (index >= 0)
+        {
+            SelectedIndex = index;
+        }
+
+        Activate();
+    }
+
+    /// <inheritdoc/>
+    public override void PointerMoved(UiVec2 point) => _hovered = IndexAt(point);
+
+    /// <inheritdoc/>
+    protected override void OnPointerOverChanged(bool over)
+    {
+        if (!over)
+        {
+            _hovered = -1;
+        }
+    }
+
+    /// <inheritdoc/>
+    protected override void OnUpdate(float elapsedSeconds)
+    {
+        base.OnUpdate(elapsedSeconds);
+        if (_selected < _tabCenters.Length)
+        {
+            // The first frame there is a layout, the block starts where it belongs instead of sliding in.
+            PlaceBlock();
+
+            _indicator.Target = _tabRects[_selected].X;
+            _indicatorWidth.Target = _tabRects[_selected].Width;
+        }
+
+        _indicator.Update(elapsedSeconds);
+        _indicatorWidth.Update(elapsedSeconds);
+    }
+
+    /// <inheritdoc/>
+    protected override UiVec2 MeasureContent(LayoutContext context, UiVec2 available)
+    {
+        float sizePx = context.Px(CaptionSize);
+        float gap = context.Px(Spacing);
+        float pad = context.Px(TabPadding);
+        float width = gap;
+        for (int i = 0; i < _tabs.Count; i++)
+        {
+            width += UiPainter.MeasureLabel(Theme.Heading, Upper(_tabs[i]), sizePx, CaptionTracking) + NoteWidth(context, i) + (pad * 2f) + gap;
+        }
+
+        return new UiVec2(Stretch && !float.IsPositiveInfinity(available.X) ? available.X : width, context.Px(SegmentHeight) + (gap * 2f));
+    }
+
+    /// <inheritdoc/>
+    protected override void ArrangeContent(LayoutContext context, UiRect contentRect)
+    {
+        float sizePx = context.Px(CaptionSize);
+        float gap = context.Px(Spacing);
+        float pad = context.Px(TabPadding);
+        float height = context.Px(SegmentHeight);
+
+        _tabRects = new UiRect[_tabs.Count];
+        _tabCenters = new float[_tabs.Count];
+        _tabWidths = new float[_tabs.Count];
+
+        float x = contentRect.X + gap;
+        for (int i = 0; i < _tabs.Count; i++)
+        {
+            float w = UiPainter.MeasureLabel(Theme.Heading, Upper(_tabs[i]), sizePx, CaptionTracking) + NoteWidth(context, i);
+            _tabWidths[i] = w;
+            _tabRects[i] = new UiRect(x, contentRect.Y + gap, w + (pad * 2f), height);
+            _tabCenters[i] = _tabRects[i].Center.X;
+            x += _tabRects[i].Width + gap;
+        }
+
+        if (Stretch && _tabs.Count > 0)
+        {
+            float each = (contentRect.Width - (gap * (_tabs.Count + 1))) / _tabs.Count;
+            for (int i = 0; i < _tabs.Count; i++)
+            {
+                _tabRects[i] = new UiRect(contentRect.X + gap + (i * (each + gap)), contentRect.Y + gap, each, height);
+                _tabCenters[i] = _tabRects[i].Center.X;
+            }
+        }
+    }
+
+    /// <inheritdoc/>
+    protected override void OnDraw(UiPainter painter)
+    {
+        if (_tabs.Count == 0 || _tabRects.Length != _tabs.Count)
+        {
+            return;
+        }
+
+        LayoutContext context = painter.Context;
+        float appear = Visual.Appear;
+        float focus = Visual.Focus;
+
+        // The tray: dark glass with a hairline, the segments set inside it.
+        if (ShowTray)
+        {
+            painter.FillRect(Bounds, UiPalette.Fade(UiPalette.Ink.WithAlpha(Theme.Large ? (byte)140 : (byte)153), appear));
+            Bgra32 edge = Theme.Large ? UiPalette.White(0.28f) : Theme.Border;
+            painter.StrokeRect(Bounds, context.Px(Theme.Large && focus > 0.5f ? 2f : 1f), UiPalette.Fade(Interpolate.Lerp(edge, Theme.Large ? Theme.AccentHover : UiPalette.AccentAt(0.45f), focus), appear));
+        }
+
+        // The sliding block; before its first update it is drawn where the selection is.
+        UiRect selected = _tabRects[_selected];
+        PlaceBlock();
+
+        painter.FillRect(
+            new UiRect(_indicator.Value, selected.Y, _indicatorWidth.Value, selected.Height),
+            UiPalette.Fade(Theme.Large ? Theme.Text : _hovered == _selected ? Theme.AccentHover : Theme.Accent, appear));
+
+        float sizePx = context.Px(CaptionSize);
+        for (int i = 0; i < _tabs.Count; i++)
+        {
+            UiRect rect = _tabRects[i];
+
+            // How much of the block is under this segment decides its caption's colour, so the dark text
+            // follows the amber across rather than flipping when the selection lands.
+            float overlap = MathF.Max(0f, MathF.Min(rect.Right, _indicator.Value + _indicatorWidth.Value) - MathF.Max(rect.X, _indicator.Value));
+            float covered = rect.Width <= 0f ? 0f : Math.Clamp(overlap / rect.Width, 0f, 1f);
+            Bgra32 rest = _hovered == i ? Theme.TextBright : Theme.Large ? Theme.TextSecondary : UiPalette.TextTertiary;
+            Bgra32 color = Interpolate.Lerp(rest, Theme.OnAccent, covered);
+
+            string caption = Upper(_tabs[i]);
+            UiVec2 end = painter.DrawLabel(
+                Theme.Heading,
+                caption,
+                new UiVec2(rect.X + ((rect.Width - _tabWidths[i]) * 0.5f), UiRowStyle.CapsCenterY(Theme.Heading, sizePx, rect)),
+                sizePx,
+                UiPalette.Fade(color, appear),
+                CaptionTracking);
+            if (NoteOf(i) is { } note)
+            {
+                float notePx = context.Px(NoteSize);
+                Bgra32 noteColor = Interpolate.Lerp(UiPalette.TextTertiary, Theme.OnAccent, covered);
+                painter.DrawLabel(Theme.Mono, note, new UiVec2(end.X + context.Px(NoteGap), UiRowStyle.CapsCenterY(Theme.Mono, notePx, rect)), notePx, UiPalette.Fade(noteColor, appear * 0.85f), 0.12f);
+            }
+        }
+    }
+
+    // Puts the block down the first time there is a layout: on the selected tab, or on the one it is to slide from.
+    private void PlaceBlock()
+    {
+        if (_indicatorWidth.Value > 0f)
+        {
+            return;
+        }
+
+        UiRect start = _tabRects[_slideFrom is { } from && from < _tabRects.Length ? from : _selected];
+        _indicator.SnapTo(start.X);
+        _indicatorWidth.SnapTo(start.Width);
+        _slideFrom = null;
+    }
+
+    private float CaptionSize => TextSize > 0f ? TextSize : Theme.LabelTextSize;
+
+    // A note's size and its gap from the caption. Design units.
+    private const float NoteSize = 11f;
+    private const float NoteGap = 12f;
+
+    private string? NoteOf(int index) => Notes is { } notes && index < notes.Count && notes[index].Length > 0 ? notes[index] : null;
+
+    private float NoteWidth(LayoutContext context, int index) =>
+        NoteOf(index) is { } note ? context.Px(NoteGap) + UiPainter.MeasureLabel(Theme.Mono, note, context.Px(NoteSize), 0.12f) : 0f;
+
+    private string Upper(string caption)
+    {
+        if (!_upper.TryGetValue(caption, out string? upper))
+        {
+            upper = caption.ToUpperInvariant();
+            _upper[caption] = upper;
+        }
+
+        return upper;
+    }
+}

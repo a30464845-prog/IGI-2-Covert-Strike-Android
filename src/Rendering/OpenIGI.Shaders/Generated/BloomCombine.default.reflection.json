@@ -1,0 +1,284 @@
+{
+  "module": "BloomCombine",
+  "variant": "default",
+  "entryPoints": [
+    {
+      "name": "computeMain",
+      "stage": "Compute",
+      "workgroupSize": [
+        8,
+        8,
+        1
+      ]
+    }
+  ],
+  "bindings": [
+    {
+      "name": "uLevel0",
+      "group": 0,
+      "binding": 0,
+      "kind": "Texture",
+      "dimensions": 2,
+      "storageFormat": "None",
+      "wgslStorageFormat": "None",
+      "storageAccess": "None",
+      "hlsl": {
+        "class": "ShaderResource",
+        "register": 0,
+        "space": 0
+      }
+    },
+    {
+      "name": "uLevel0Sampler",
+      "group": 0,
+      "binding": 1,
+      "kind": "Sampler",
+      "dimensions": 0,
+      "storageFormat": "None",
+      "wgslStorageFormat": "None",
+      "storageAccess": "None",
+      "hlsl": {
+        "class": "Sampler",
+        "register": 0,
+        "space": 0
+      }
+    },
+    {
+      "name": "uLevel1",
+      "group": 0,
+      "binding": 2,
+      "kind": "Texture",
+      "dimensions": 2,
+      "storageFormat": "None",
+      "wgslStorageFormat": "None",
+      "storageAccess": "None",
+      "hlsl": {
+        "class": "ShaderResource",
+        "register": 1,
+        "space": 0
+      }
+    },
+    {
+      "name": "uLevel1Sampler",
+      "group": 0,
+      "binding": 3,
+      "kind": "Sampler",
+      "dimensions": 0,
+      "storageFormat": "None",
+      "wgslStorageFormat": "None",
+      "storageAccess": "None",
+      "hlsl": {
+        "class": "Sampler",
+        "register": 1,
+        "space": 0
+      }
+    },
+    {
+      "name": "uLevel2",
+      "group": 0,
+      "binding": 4,
+      "kind": "Texture",
+      "dimensions": 2,
+      "storageFormat": "None",
+      "wgslStorageFormat": "None",
+      "storageAccess": "None",
+      "hlsl": {
+        "class": "ShaderResource",
+        "register": 2,
+        "space": 0
+      }
+    },
+    {
+      "name": "uLevel2Sampler",
+      "group": 0,
+      "binding": 5,
+      "kind": "Sampler",
+      "dimensions": 0,
+      "storageFormat": "None",
+      "wgslStorageFormat": "None",
+      "storageAccess": "None",
+      "hlsl": {
+        "class": "Sampler",
+        "register": 2,
+        "space": 0
+      }
+    },
+    {
+      "name": "uLevel3",
+      "group": 0,
+      "binding": 6,
+      "kind": "Texture",
+      "dimensions": 2,
+      "storageFormat": "None",
+      "wgslStorageFormat": "None",
+      "storageAccess": "None",
+      "hlsl": {
+        "class": "ShaderResource",
+        "register": 3,
+        "space": 0
+      }
+    },
+    {
+      "name": "uLevel3Sampler",
+      "group": 0,
+      "binding": 7,
+      "kind": "Sampler",
+      "dimensions": 0,
+      "storageFormat": "None",
+      "wgslStorageFormat": "None",
+      "storageAccess": "None",
+      "hlsl": {
+        "class": "Sampler",
+        "register": 3,
+        "space": 0
+      }
+    },
+    {
+      "name": "uLevel4",
+      "group": 0,
+      "binding": 8,
+      "kind": "Texture",
+      "dimensions": 2,
+      "storageFormat": "None",
+      "wgslStorageFormat": "None",
+      "storageAccess": "None",
+      "hlsl": {
+        "class": "ShaderResource",
+        "register": 4,
+        "space": 0
+      }
+    },
+    {
+      "name": "uLevel4Sampler",
+      "group": 0,
+      "binding": 9,
+      "kind": "Sampler",
+      "dimensions": 0,
+      "storageFormat": "None",
+      "wgslStorageFormat": "None",
+      "storageAccess": "None",
+      "hlsl": {
+        "class": "Sampler",
+        "register": 4,
+        "space": 0
+      }
+    },
+    {
+      "name": "uLevel5",
+      "group": 0,
+      "binding": 10,
+      "kind": "Texture",
+      "dimensions": 2,
+      "storageFormat": "None",
+      "wgslStorageFormat": "None",
+      "storageAccess": "None",
+      "hlsl": {
+        "class": "ShaderResource",
+        "register": 5,
+        "space": 0
+      }
+    },
+    {
+      "name": "uLevel5Sampler",
+      "group": 0,
+      "binding": 11,
+      "kind": "Sampler",
+      "dimensions": 0,
+      "storageFormat": "None",
+      "wgslStorageFormat": "None",
+      "storageAccess": "None",
+      "hlsl": {
+        "class": "Sampler",
+        "register": 5,
+        "space": 0
+      }
+    },
+    {
+      "name": "uTarget",
+      "group": 0,
+      "binding": 12,
+      "kind": "StorageTexture",
+      "dimensions": 2,
+      "storageFormat": "Rgba16Float",
+      "wgslStorageFormat": "Rgba16Float",
+      "storageAccess": "WriteOnly",
+      "hlsl": {
+        "class": "UnorderedAccess",
+        "register": 0,
+        "space": 0
+      },
+      "glslUnit": 0
+    },
+    {
+      "name": "p",
+      "group": 0,
+      "binding": 13,
+      "kind": "UniformBuffer",
+      "dimensions": 0,
+      "storageFormat": "None",
+      "wgslStorageFormat": "None",
+      "storageAccess": "None",
+      "hlsl": {
+        "class": "ConstantBuffer",
+        "register": 0,
+        "space": 0
+      },
+      "glslUnit": 0
+    }
+  ],
+  "pushBlock": null,
+  "specializationConstants": [],
+  "globals": null,
+  "glslSamplers": [
+    {
+      "texture": "uLevel0",
+      "sampler": "uLevel0Sampler",
+      "unit": 0
+    },
+    {
+      "texture": "uLevel1",
+      "unit": 1
+    },
+    {
+      "texture": "uLevel1",
+      "sampler": "uLevel1Sampler",
+      "unit": 2
+    },
+    {
+      "texture": "uLevel2",
+      "unit": 3
+    },
+    {
+      "texture": "uLevel2",
+      "sampler": "uLevel2Sampler",
+      "unit": 4
+    },
+    {
+      "texture": "uLevel3",
+      "unit": 5
+    },
+    {
+      "texture": "uLevel3",
+      "sampler": "uLevel3Sampler",
+      "unit": 6
+    },
+    {
+      "texture": "uLevel4",
+      "unit": 7
+    },
+    {
+      "texture": "uLevel4",
+      "sampler": "uLevel4Sampler",
+      "unit": 8
+    },
+    {
+      "texture": "uLevel5",
+      "unit": 9
+    },
+    {
+      "texture": "uLevel5",
+      "sampler": "uLevel5Sampler",
+      "unit": 10
+    }
+  ]
+}

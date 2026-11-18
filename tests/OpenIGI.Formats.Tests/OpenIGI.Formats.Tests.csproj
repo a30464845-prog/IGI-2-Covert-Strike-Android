@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Core\OpenIGI.Formats\OpenIGI.Formats.csproj" />
+    <ProjectReference Include="..\OpenIGI.TestSupport\OpenIGI.TestSupport.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="coverlet.collector" />
+    <!-- A second PNG encoder to check PngImage against: Skia writes the PNGs a browser or Discord would. -->
+    <PackageReference Include="SkiaSharp" />
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux.NoDependencies" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The decoded-pixel hashes the JPEG reader was verified against, copied beside the tests. -->
+    <None Include="JpegFingerprints.tsv" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

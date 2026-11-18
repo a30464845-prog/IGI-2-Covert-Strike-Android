@@ -1,0 +1,201 @@
+using OpenIGI.Core.Graphics;
+using OpenIGI.Core.Numerics;
+using OpenIGI.Formats.World;
+
+namespace OpenIGI.Game.World;
+
+/// <summary>Turns a loaded <c>.mef</c> model into buffers a graphics device can hold.</summary>
+/// <remarks>
+/// <para>
+/// The vertex layouts already match — <see cref="Vertex3D"/> is deliberately the original's 40-byte
+/// model vertex — so this is really about the index buffer. A model's draw records index its vertices two
+/// different ways depending on the mesh format: a lightmapped model's indices are relative to the
+/// record's base vertex, the other two formats index the whole array. Flattening resolves both to
+/// absolute indices in one buffer, and each record becomes a <see cref="MeshSubset"/> naming its range
+/// and its material slot.
+/// </para>
+/// <para>
+/// The material slot is carried through rather than resolved here: a slot names a position in the
+/// <em>instance's</em> list, so the same model drawn by two instances wears two different sets of
+/// textures. Only the caller knows which instance it is drawing.
+/// </para>
+/// </remarks>
+public static class MefMeshBuilder
+{
+    /// <summary>How far apart two faces' planes may be and still be one sheet's two faces, in model units: an eighth of a millimetre.</summary>
+    private const float SkinPlaneToleranceUnits = 0.5f;
+
+    /// <summary>Flattens a model's vertices and draw records into device-ready buffers.</summary>
+    /// <param name="model">The model to convert.</param>
+    /// <param name="scale">
+    /// A factor applied to every position. Model vertices use the same units as world positions, so pass
+    /// <c>1 / <see cref="WorldScene.UnitsPerMetre"/></c> to get metres.
+    /// </param>
+    /// <returns>The geometry, or <see langword="null"/> when the model has nothing to draw.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="model"/> is <see langword="null"/>.</exception>
+    public static MeshGeometry? Build(MefModel model, float scale = 1f)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+
+        if (model.IsEmpty || model.DrawRecords.Count == 0)
+        {
+            return null;
+        }
+
+        ReadOnlySpan<MefVertex> source = model.Vertices;
+        Vertex3D[] vertices = new Vertex3D[source.Length];
+        for (int i = 0; i < source.Length; i++)
+        {
+            MefVertex v = source[i];
+            vertices[i] = new Vertex3D(
+                new Vector3f(v.Position.X * scale, v.Position.Y * scale, v.Position.Z * scale),
+                v.Normal,
+                v.DiffuseU,
+                v.DiffuseV,
+                v.LightmapU,
+                v.LightmapV);
+        }
+
+        int total = 0;
+        foreach (MefDrawRecord record in model.DrawRecords)
+        {
+            total += record.Indices.Length;
+        }
+
+        ushort[] indices = new ushort[total];
+        List<MeshSubset> subsets = new(model.DrawRecords.Count);
+        int cursor = 0;
+
+        foreach (MefDrawRecord record in model.DrawRecords)
+        {
+            ReadOnlySpan<ushort> source2 = record.Indices.Span;
+            int start = cursor;
+            foreach (ushort index in source2)
+            {
+                indices[cursor++] = (ushort)record.ToVertexIndex(index);
+            }
+
+            SubsetBlend blend = record.IsAdditive ? SubsetBlend.Additive
+                : record.IsTransparent ? SubsetBlend.Translucent
+                : record.IsAlphaTested ? SubsetBlend.AlphaTested
+                : SubsetBlend.Opaque;
+            subsets.Add(new MeshSubset(start, source2.Length, record.MaterialSlot, record.LightmapPage, Blend: blend));
+        }
+
+        // Every model is wound by its authored order, never by its normals. The original culls the stored order counter-
+        // clockwise for every model it draws (the model states 0x49D480 and 0x49D810, drawn by 0x49DF60 and 0x49C850), and
+        // the normals are no guide to it: whole models carry theirs pointing in -- every ladder, the doors, the watchtower,
+        // the helicopters (issue #50), and mission 14's yard and halls among the rooms -- and many more have a share of
+        // faces whose normals were smoothed across an edge. Wound to the normals, those faces turned inside out and the
+        // preset that culls drew their insides. The stored order is mirrored whole into this renderer's facing.
+        // A model with no normals (IGI 2's lightmapped geometry) is drawn two-sided and keeps the order it was stored in.
+        bool authored = HasNormals(vertices);
+        if (authored)
+        {
+            MirrorWinding(indices);
+        }
+        else
+        {
+            // Baked geometry is lit by its bake alone in the original, so it stores no normal. A look that
+            // lights the world itself has nothing to light such a surface by -- a hall of it stays black
+            // under its own lamps -- so each vertex is given the normal its faces have.
+            FaceNormals(vertices, indices);
+        }
+
+        // Wound as stored, a sheet's two faces face apart, and the faces that coincide can be drawn culled.
+        MeshSubset[] partitioned = CoincidentSkins.Partition(vertices, indices, subsets, SkinPlaneToleranceUnits * scale);
+        return new MeshGeometry(vertices, indices, partitioned) { HasDerivedNormals = !authored };
+    }
+
+    /// <summary>Gives every vertex the area-weighted normal of the faces that meet at it, facing whoever sees them.</summary>
+    /// <param name="vertices">The vertices, whose normals are written.</param>
+    /// <param name="indices">The triangle list, in the order the model stores it.</param>
+    /// <remarks>
+    /// <para>
+    /// The stored order faces each surface AWAY from whoever is meant to see it (see <see cref="MirrorWinding"/>),
+    /// so the side that is looked at is the one opposite the stored winding's normal, and that is the side
+    /// the normal is put on.
+    /// </para>
+    /// <para>
+    /// The raw cross product has the triangle's doubled area for its length, so summing them weights each
+    /// face by its size without weighting anything by hand. A vertex whose faces cancel keeps no normal
+    /// rather than an arbitrary one.
+    /// </para>
+    /// </remarks>
+    public static void FaceNormals(Vertex3D[] vertices, ushort[] indices)
+    {
+        ArgumentNullException.ThrowIfNull(vertices);
+        ArgumentNullException.ThrowIfNull(indices);
+
+        Vector3f[] summed = new Vector3f[vertices.Length];
+
+        for (int at = 0; at + 2 < indices.Length; at += 3)
+        {
+            int a = indices[at];
+            int b = indices[at + 1];
+            int c = indices[at + 2];
+
+            if (a >= vertices.Length || b >= vertices.Length || c >= vertices.Length)
+            {
+                continue;
+            }
+
+            Vector3f ab = vertices[b].Position - vertices[a].Position;
+            Vector3f ac = vertices[c].Position - vertices[a].Position;
+            Vector3f seen = new(
+                (ac.Y * ab.Z) - (ac.Z * ab.Y),
+                (ac.Z * ab.X) - (ac.X * ab.Z),
+                (ac.X * ab.Y) - (ac.Y * ab.X));
+
+            summed[a] += seen;
+            summed[b] += seen;
+            summed[c] += seen;
+        }
+
+        for (int i = 0; i < vertices.Length; i++)
+        {
+            float length = MathF.Sqrt(summed[i].LengthSquared);
+
+            if (!(length > 1e-12f) || !float.IsFinite(length))
+            {
+                continue;
+            }
+
+            Vertex3D v = vertices[i];
+            vertices[i] = new Vertex3D(
+                v.Position,
+                new Vector3f(summed[i].X / length, summed[i].Y / length, summed[i].Z / length),
+                v.DiffuseU,
+                v.DiffuseV,
+                v.LightmapU,
+                v.LightmapV);
+        }
+    }
+
+    /// <summary>Turns every triangle over: the authored draw order faces the other way to this renderer's front.</summary>
+    /// <param name="indices">The triangle-list indices, rewound in place.</param>
+    /// <remarks>
+    /// <para>
+    /// The authored order faces each surface away from whoever is meant to see it, props and rooms alike, so turning all of
+    /// them over gives the front the original culls to, without consulting a normal.
+    /// </para>
+    /// <para>
+    /// Public because it is not only this builder's business: anything that assembles world geometry from a model's raw draw
+    /// records -- a bent spline segment -- must turn it over the same way, or the preset that culls removes its front.
+    /// </para>
+    /// </remarks>
+    public static void MirrorWinding(ushort[] indices)
+    {
+        ArgumentNullException.ThrowIfNull(indices);
+        for (int t = 0; t + 2 < indices.Length; t += 3)
+        {
+            (indices[t + 1], indices[t + 2]) = (indices[t + 2], indices[t + 1]);
+        }
+    }
+
+    /// <summary>Whether every vertex carries a usable normal.</summary>
+    /// <param name="vertices">The mesh's vertices.</param>
+    /// <returns><see langword="true"/> when none of the normals is zero or not finite.</returns>
+    public static bool HasNormals(Vertex3D[] vertices) =>
+        Array.TrueForAll(vertices, static v => float.IsFinite(v.Normal.LengthSquared) && v.Normal.LengthSquared > 0.000001f);
+}

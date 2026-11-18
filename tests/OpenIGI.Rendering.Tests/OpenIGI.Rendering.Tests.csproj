@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Core\OpenIGI.Core\OpenIGI.Core.csproj" />
+    <ProjectReference Include="..\OpenIGI.TestSupport\OpenIGI.TestSupport.csproj" />
+    <ProjectReference Include="..\..\src\Rendering\OpenIGI.Rendering\OpenIGI.Rendering.csproj" />
+  </ItemGroup>
+
+  <!--
+    The shipped colour grades, so the tests check the files the game will actually load rather than a
+    copy of them. A grade that parses in a test and not in the game is the failure worth catching.
+  -->
+  <ItemGroup>
+    <None Include="..\..\apps\OpenIGI.Composition\Assets\luts\*.cube"
+          Link="Assets\luts\%(Filename)%(Extension)"
+          CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <!-- The committed inventory of the renderer's console variables, which RenderCVarInventoryTests reads. -->
+  <ItemGroup>
+    <None Update="Baselines\*.txt" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="coverlet.collector" />
+  </ItemGroup>
+
+</Project>

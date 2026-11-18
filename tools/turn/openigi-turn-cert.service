@@ -1,0 +1,6 @@
+[Unit]
+Description=Copy the OpenIGI relay's certificate to coturn
+
+[Service]
+Type=oneshot
+ExecStart=/srv/openigi-turn/tls-cert.sh

@@ -1,0 +1,104 @@
+name: Release
+
+# The button. Actions > Release > Run workflow:
+#   beta      on develop: a game beta (v0.2.0-beta.3)
+#   stable    on master:  a game release (v0.2.0)
+#   launcher  on master:  the launcher alone (launcher-v0.1.1), with no game build at all
+# It works out the version from the commits, tags the branch head with the release notes, and runs the
+# release (release.yml) for that tag. Nothing else needs doing by hand.
+on:
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: beta (game, from develop), stable (game, from master) or launcher (from master)
+        type: choice
+        options: [beta, stable, launcher]
+        required: true
+
+permissions:
+  contents: write
+  packages: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+# Steps run in bash everywhere: a job container's default shell is sh, which has no arrays or ${x::n}.
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  cut:
+    name: cut ${{ inputs.channel }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    container:
+      image: ghcr.io/openigi/ci:latest
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Check the branch
+        env:
+          CHANNEL: ${{ inputs.channel }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          case "$CHANNEL:$BRANCH" in
+            beta:develop|stable:master|launcher:master) ;;
+            *) echo "::error::A $CHANNEL release is cut from $( [ "$CHANNEL" = beta ] && echo develop || echo master ), not $BRANCH."; exit 1 ;;
+          esac
+
+      - name: Work out the version
+        id: version
+        run: |
+          version=$(tools/release/next-version.sh "${{ inputs.channel }}")
+          prefix=v; [ "${{ inputs.channel }}" = launcher ] && prefix=launcher-v
+          echo "tag=$prefix$version" >> "$GITHUB_OUTPUT"
+          echo "Next ${{ inputs.channel }} release: **$prefix$version**" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Tag
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag "$TAG"
+          tools/release/notes.sh "$TAG" "$RUNNER_TEMP/notes"
+          git tag -d "$TAG"
+          git tag -a "$TAG" -F "$RUNNER_TEMP/notes/notes.md" --cleanup=verbatim
+          git push origin "refs/tags/$TAG"
+
+      # A stable tag sits on master's merge of develop, which develop does not contain. Bringing it back
+      # keeps the next beta's version and notes counted from this release rather than from the last one.
+      - name: Bring master back into develop
+        if: inputs.channel == 'stable'
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          git fetch origin develop
+          git checkout -B develop origin/develop
+          git merge --no-edit -m "chore: merge $TAG back into develop" "$TAG" || {
+            echo "::warning::develop does not merge $TAG cleanly; merge master into develop by hand."
+            git merge --abort; exit 0; }
+          git push origin develop
+
+  # A called workflow gets no more than its caller grants, and the release trades an OIDC token for its nuget.org key
+  # and for publishing the site on GitHub Pages.
+  release:
+    needs: cut
+    permissions:
+      contents: write
+      packages: read
+      id-token: write
+      pages: write
+    uses: ./.github/workflows/release.yml
+    with:
+      tag: ${{ needs.cut.outputs.tag }}
+    secrets: inherit

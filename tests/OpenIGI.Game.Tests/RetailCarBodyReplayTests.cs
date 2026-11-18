@@ -1,0 +1,157 @@
+using OpenIGI.Core.Collections;
+using OpenIGI.Game.Physics;
+using OpenIGI.Game.World;
+using Xunit;
+using Xunit.Abstractions;
+
+namespace OpenIGI.Game.Tests;
+
+/// <summary>
+/// Replays retail car ticks through <see cref="RetailCarBody"/> and demands the original's bytes back.
+/// </summary>
+/// <remarks>
+/// The fixtures are mission 7's APC 352 driving its CarAI route for 600 ticks, and its T80 357 for 900 from
+/// the tick it spawns with its tracks below the road (the bottom-out lift, the fall, the settle), captured by
+/// the probe's <c>carstep</c> hook set: the car object at every <c>Car_Tick</c> entry, every force pushed
+/// onto its body, and the wheel rays with their results. The rays are answered from the capture; everything
+/// else is the port's own arithmetic.
+/// </remarks>
+public sealed class RetailCarBodyReplayTests(ITestOutputHelper output)
+{
+    private static readonly Dictionary<string, RetailCarStepCapture> Captures = [];
+
+    public static TheoryData<string> Fixtures => new()
+    {
+        "carstep-m7-apc352.log.gz",
+        "carstep-m7-t80-357.log.gz",
+        "carstep-m7-t80-357-safe.log.gz",
+        "carstep-m6-car801.log.gz",
+    };
+
+    [Theory]
+    [MemberData(nameof(Fixtures))]
+    public void EveryTickFromItsOwnEntryMatchesRetailBitForBit(string fixture)
+    {
+        RetailCarStepCapture capture = Load(fixture);
+        RetailCarDefinition definition = RetailCarMemory.Definition(capture.TypeMemory, capture.RecordMemory);
+        List<string> failures = [];
+        int replayed = 0;
+        for (int t = 0; t + 1 < capture.Ticks.Count; t++)
+        {
+            RetailCarStepCapture.Tick tick = capture.Ticks[t];
+            RetailCarStepCapture.Tick next = capture.Ticks[t + 1];
+            if (next.Sequence != tick.Sequence + 1)
+            {
+                continue;
+            }
+
+            RetailCarBody car = new(definition);
+            RetailCarMemory.Load(car, tick.Entry);
+            List<string> diff = Step(car, tick, next);
+            replayed++;
+            if (diff.Count != 0)
+            {
+                failures.Add($"tick {tick.Sequence}: {string.Join("; ", diff.Take(12))}{(diff.Count > 12 ? $" (+{diff.Count - 12})" : string.Empty)}");
+            }
+        }
+
+        foreach (string failure in failures.Take(20))
+        {
+            output.WriteLine(failure);
+        }
+
+        Assert.True(replayed > 500, $"only {replayed} tick pairs replayed");
+        Assert.True(failures.Count == 0, $"{failures.Count} of {replayed} ticks differ; first: {failures.FirstOrDefault()}");
+    }
+
+    [Theory]
+    [MemberData(nameof(Fixtures))]
+    public void TheWholeDriveReplaysFromTheFirstTickAlone(string fixture)
+    {
+        RetailCarStepCapture capture = Load(fixture);
+        RetailCarBody car = new(RetailCarMemory.Definition(capture.TypeMemory, capture.RecordMemory));
+        RetailCarMemory.Load(car, capture.Ticks[0].Entry);
+        int t = 0;
+        for (; t + 1 < capture.Ticks.Count; t++)
+        {
+            RetailCarStepCapture.Tick tick = capture.Ticks[t];
+            RetailCarStepCapture.Tick next = capture.Ticks[t + 1];
+            Assert.Equal(tick.Sequence + 1, next.Sequence);
+
+            // Only the controller's packet reaches the car between two ticks.
+            RetailCarMemory.LoadControls(car, tick.Entry);
+            List<string> diff = Step(car, tick, next);
+            Assert.True(diff.Count == 0, $"tick {tick.Sequence}: {string.Join("; ", diff.Take(12))}");
+        }
+
+        output.WriteLine($"{t} ticks replayed; final position ({car.Position[0]:R}, {car.Position[1]:R}, {car.Position[2]:R})");
+    }
+
+    /// <summary>
+    /// Over a recorded drive, each drawn wheel rolls on its own (Wheel_Run, 0x4301C0): one carried forward rolls its count down, and
+    /// stands on its spring, its body point's compression less the wheel drop (Wheel_Move, 0x430640).
+    /// </summary>
+    [Fact]
+    public void EachDrawnWheelRollsAndStandsOnItsOwnSpring()
+    {
+        RetailCarStepCapture capture = Load("carstep-m7-apc352.log.gz");
+        RetailCarBody car = new(RetailCarMemory.Definition(capture.TypeMemory, capture.RecordMemory)) { WheelDrop = 512f };
+        RetailCarMemory.Load(car, capture.Ticks[0].Entry);
+        CarWheel[] wheels = [.. car.Definition.Wheels.Select(static w => new CarWheel(w, default, 0.95f, 0.05f, 2048f))];
+        CarMotionState motion = new();
+        for (int t = 0; t + 1 < capture.Ticks.Count; t++)
+        {
+            RetailCarMemory.LoadControls(car, capture.Ticks[t].Entry);
+            car.Tick(new RetailCarMemory.RecordedWorld(capture.Ticks[t]));
+            CarDynamics.AnimateWheels(motion, car, wheels);
+        }
+
+        Assert.True(motion.HasWheelStates);
+        for (int i = 0; i < car.Definition.Wheels.Length; i++)
+        {
+            Assert.True(motion.WheelRolls[i] < -1d, $"wheel {i} rolled {motion.WheelRolls[i]}");
+            int point = car.Definition.Wheels[i].ContactPoint is int c and < 0 ? -10 - c : car.Definition.Wheels[i].ContactPoint;
+            Assert.Equal(car.Points[point].Compression - 512.0, motion.WheelLifts[i], 3);
+        }
+    }
+
+    private static RetailCarStepCapture Load(string fixture)
+    {
+        lock (Captures)
+        {
+            return Captures.GetOrAdd(fixture, RetailCarStepCapture.Load);
+        }
+    }
+
+    private static List<string> Step(RetailCarBody car, RetailCarStepCapture.Tick tick, RetailCarStepCapture.Tick next)
+    {
+        RetailCarMemory.RecordedWorld world = new(tick);
+        car.Tick(world);
+        List<string> diff = [.. world.RayErrors];
+
+        // The forces are consumed inside the tick, so compare what the port pushed as it pushed them.
+        List<PointForce> pushed = car.PushedForces;
+        if (pushed.Count != tick.Forces.Count)
+        {
+            diff.Add($"force count: port {pushed.Count} retail {tick.Forces.Count}");
+        }
+
+        for (int k = 0; k < Math.Min(pushed.Count, tick.Forces.Count); k++)
+        {
+            PointForce p = pushed[k];
+            RetailCarStepCapture.Force r = tick.Forces[k];
+            float[] port = [p.Force.X, p.Force.Y, p.Force.Z, p.Point.X, p.Point.Y, p.Point.Z];
+            float[] retail = [.. r.Vector, .. r.Point];
+            for (int c = 0; c < 6; c++)
+            {
+                if (BitConverter.SingleToInt32Bits(port[c]) != BitConverter.SingleToInt32Bits(retail[c]))
+                {
+                    diff.Add($"force{k} (0x{r.Caller:X}) [{c}]: port {port[c]:R} retail {retail[c]:R}");
+                }
+            }
+        }
+
+        diff.AddRange(RetailCarMemory.Diff(car, next.Entry));
+        return diff;
+    }
+}

@@ -1,0 +1,335 @@
+name: Publish release
+
+# Builds, tests, packages and publishes one tagged release:
+#   - every download (the game in two flavours for Windows, Linux and macOS; or, for a launcher release,
+#     the launcher alone) on the GitHub release, with the changelog as its notes;
+#   - the release's manifest (release.json) and its browser build (openigi-web-<version>.tar.gz) beside them;
+#   - then the site (site.yml), which reads those back: the feeds the launcher polls, so it offers the release
+#     within minutes, and the browser build on openigi.com (stable) or openigi.com/beta/ (both).
+#
+# Run by the Release button (release-cut.yml), by pushing a vX.Y.Z / vX.Y.Z-beta.N tag by hand, or, for a tag
+# already pushed, by Run workflow with its name (a tag push does not always start a run).
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+      - "v[0-9]+.[0-9]+.[0-9]+-beta.[0-9]+"
+      - "launcher-v[0-9]+.[0-9]+.[0-9]+"
+  workflow_call:
+    inputs:
+      tag:
+        type: string
+        required: true
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: The release tag to publish, already pushed (v0.4.0, v0.5.0-beta.1, launcher-v0.4.1)
+        type: string
+        required: true
+
+permissions:
+  contents: write
+  packages: read
+  # nuget.org's Trusted Publishing: the job's OIDC token is traded for a short-lived push key; GitHub Pages trades it too.
+  id-token: write
+  pages: write
+
+concurrency:
+  group: publish-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  TAG: ${{ inputs.tag || github.ref_name }}
+  NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
+  RUNTIMES: win-x64 linux-x64 osx-arm64
+  # The dedicated server's other runtimes, beside linux-x64 and win-x64.
+  SERVER_ARM_RUNTIMES: linux-arm64 win-arm64
+
+# Steps run in bash everywhere: a job container's default shell is sh, which has no arrays or ${x::n}.
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  publish:
+    name: publish ${{ inputs.tag || github.ref_name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    container:
+      image: ghcr.io/openigi/ci:latest
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    outputs:
+      version: ${{ steps.tag.outputs.version }}
+      channel: ${{ steps.tag.outputs.channel }}
+      product: ${{ steps.tag.outputs.product }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: refs/tags/${{ env.TAG }}
+          fetch-depth: 0
+
+      - name: Read the tag
+        id: tag
+        run: |
+          # The game's line (v0.2.0, v0.2.0-beta.3) and the launcher's own (launcher-v0.1.1, stable only).
+          product=game; version="${TAG#v}"
+          if [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-beta\.[0-9]+$ ]]; then channel=beta; branch=develop
+          elif [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then channel=stable; branch=master
+          elif [[ "$TAG" =~ ^launcher-v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then product=launcher; version="${TAG#launcher-v}"; channel=stable; branch=master
+          else echo "::error::$TAG is not a release tag (vX.Y.Z, vX.Y.Z-beta.N or launcher-vX.Y.Z)"; exit 1; fi
+
+          # A beta is built from develop and a stable release from master, never from a feature branch.
+          git fetch --no-tags origin "$branch"
+          if ! git merge-base --is-ancestor "$TAG^{commit}" "origin/$branch"; then
+            echo "::error::$TAG is not on $branch, so it cannot be a $channel release."; exit 1
+          fi
+
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "product=$product" >> "$GITHUB_OUTPUT"
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
+          echo "commit=$(git rev-parse "$TAG^{commit}")" >> "$GITHUB_OUTPUT"
+
+      - name: Write the notes
+        run: tools/release/notes.sh "$TAG" "$RUNNER_TEMP/notes"
+
+      - uses: actions/cache@v6
+        with:
+          path: .nuget/packages
+          key: nuget-release-${{ hashFiles('Directory.Packages.props', 'global.json', '**/*.csproj') }}
+          restore-keys: nuget-
+
+      - name: Test
+        env:
+          # No sound device on a runner: OpenAL's silent backend, so audio start-up cannot take the host down.
+          ALSOFT_DRIVERS: "null"
+        run: |
+          dotnet restore OpenIGI.slnx
+          dotnet build OpenIGI.slnx --configuration Release --no-restore -p:Version=${{ steps.tag.outputs.version }}
+          $(command -v xvfb-run > /dev/null && echo "xvfb-run -a") dotnet test OpenIGI.slnx --configuration Release --no-build
+
+      - name: Package
+        env:
+          VERSION: ${{ steps.tag.outputs.version }}
+          PRODUCT: ${{ steps.tag.outputs.product }}
+          # fetch-datachannel.sh falls back to the GitHub API when the release download address fails.
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          rm -rf artifacts/release artifacts/web
+          if [ "$PRODUCT" != launcher ]; then
+            # Co-op through rooms needs libdatachannel beside the game; prebuilt by native-datachannel.yml.
+            tools/native/fetch-datachannel.sh $RUNTIMES
+          fi
+          if [ "$PRODUCT" = game ]; then
+            # The dedicated server also runs on ARM hosts (Graviton, Ampere, a Raspberry Pi, Windows on ARM).
+            tools/native/fetch-datachannel.sh $SERVER_ARM_RUNTIMES
+          fi
+          if [ "$PRODUCT" = launcher ]; then
+            # The launcher alone, self-contained only: the one program a player starts with nothing installed.
+            for rid in $RUNTIMES; do
+              tools/release/package.sh launcher "$rid" "$VERSION" self-contained
+            done
+          else
+            # The game in both flavours: self-contained, and the smaller build for machines with .NET 10. The
+            # launcher is not part of a game release; it has its own line (launcher-v tags).
+            for rid in $RUNTIMES; do
+              tools/release/package.sh game "$rid" "$VERSION" self-contained
+              tools/release/package.sh game "$rid" "$VERSION" dotnet
+            done
+            # The browser build goes to the site, not into the downloads.
+            tools/release/package.sh web browser-wasm "$VERSION"
+            # The dedicated server, for the hosts people rent: kept out of artifacts/release, whose files the launcher's
+            # manifest lists, and uploaded beside them.
+            for rid in linux-x64 win-x64 $SERVER_ARM_RUNTIMES; do
+              tools/release/package.sh server "$rid" "$VERSION" artifacts/server
+            done
+          fi
+
+      - name: Write the manifest
+        run: |
+          dotnet run --project tools/OpenIGI.Tools.Release --configuration Release -- manifest \
+            --version "${{ steps.tag.outputs.version }}" --channel "${{ steps.tag.outputs.channel }}" \
+            --commit "${{ steps.tag.outputs.commit }}" \
+            --notes "$RUNNER_TEMP/notes/context.json" --assets artifacts/release --tag "$TAG"
+
+      - name: Publish the GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.tag.outputs.version }}
+          CHANNEL: ${{ steps.tag.outputs.channel }}
+          PRODUCT: ${{ steps.tag.outputs.product }}
+        run: |
+          v="$VERSION"
+          repo="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY"
+          dl="$repo/releases/download/$TAG"
+          {
+            cat "$RUNNER_TEMP/notes/notes.md"
+            echo
+            echo "---"
+            echo
+            echo "### Downloads"
+            echo
+            if [ "$PRODUCT" = launcher ]; then
+              echo "The **OpenIGI Launcher** installs the game, keeps it up to date and starts it, and picks the right build for your machine. Launchers already installed update themselves to this one."
+              echo
+              echo "| Windows | Linux | macOS (Apple silicon) |"
+              echo "|---|---|---|"
+              echo "| [openigi-launcher-$v-win-x64.exe]($dl/openigi-launcher-$v-win-x64.exe) | [openigi-launcher-$v-linux-x64]($dl/openigi-launcher-$v-linux-x64) | [openigi-launcher-$v-osx-arm64.tar.gz]($dl/openigi-launcher-$v-osx-arm64.tar.gz) |"
+            else
+              echo "The easiest way to play is the **OpenIGI Launcher** ([openigi.com](https://openigi.com) or its [releases]($repo/releases)), which installs this build for you$( [ "$CHANNEL" = beta ] && echo ' once its update channel is set to Beta')."
+              echo "To run the game yourself, each build comes in two flavours:"
+              echo "**self-contained** runs on any machine, and **.NET** is a fraction of the size but needs the [.NET 10 runtime](https://dotnet.microsoft.com/download/dotnet/10.0) installed."
+              echo
+              # platform, runtime, extension
+              row() {
+                echo "| $1 | [openigi-game-$v-$2$3]($dl/openigi-game-$v-$2$3) | [openigi-game-$v-$2-dotnet$3]($dl/openigi-game-$v-$2-dotnet$3) |"
+              }
+              echo "| | Self-contained | Needs .NET 10 |"
+              echo "|---|---|---|"
+              row Windows win-x64 .exe
+              row Linux linux-x64 ""
+              row "macOS (Apple silicon)" osx-arm64 .tar.gz
+            fi
+            echo
+            echo "Windows and Linux builds are a single executable (on Linux, \`chmod +x\` it first). macOS builds are an app in a tarball."
+            echo "On macOS and Linux, the launcher installs with one command: \`curl -fsSL https://openigi.com/install.sh | bash\`."
+            echo "The macOS builds are not notarized, so macOS reports an app downloaded with a browser as \"damaged\"; clear that with \`xattr -dr com.apple.quarantine \"/Applications/OpenIGI Launcher.app\"\` (or the app's path)."
+            echo "OpenIGI needs your own copy of Project I.G.I.; it ships none of the game's data. Verify a download with \`sha256sum -c SHA256SUMS\`."
+            if [ "$PRODUCT" = game ]; then
+              echo
+              echo "**Dedicated server**: [openigi-server-$v-linux-x64.tar.gz]($dl/openigi-server-$v-linux-x64.tar.gz) (\`sudo ./install.sh\`) or [openigi-server-$v-win-x64.zip]($dl/openigi-server-$v-win-x64.zip) (\`.\install.ps1\`); it plays your own copy of the game too."
+              echo "On ARM hosts: [openigi-server-$v-linux-arm64.tar.gz]($dl/openigi-server-$v-linux-arm64.tar.gz) or [openigi-server-$v-win-arm64.zip]($dl/openigi-server-$v-win-arm64.zip), installed the same way."
+            fi
+          } > "$RUNNER_TEMP/notes/release.md"
+          cp "$RUNNER_TEMP/notes/notes.md" artifacts/release/CHANGELOG.md
+
+          # "Latest" on the repository's release page is the newest game release; a launcher release never
+          # takes it over.
+          title="OpenIGI $VERSION"; flags=(--latest)
+          [ "$CHANNEL" = beta ] && flags=(--prerelease --latest=false)
+          [ "$PRODUCT" = launcher ] && { title="OpenIGI Launcher $VERSION"; flags=(--latest=false); }
+          # The browser build rides along for the site to read back; it is not one of the downloads release.json lists.
+          files=(artifacts/release/*)
+          [ "$PRODUCT" = game ] && files+=("artifacts/web/openigi-web-$VERSION.tar.gz" artifacts/server/*)
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "${files[@]}" --clobber
+          else
+            gh release create "$TAG" "${files[@]}" --verify-tag "${flags[@]}" \
+              --title "$title" --notes-file "$RUNNER_TEMP/notes/release.md"
+          fi
+
+      # What mods build against, at this game's version: OpenIGI.Modding.Sdk, the assemblies it brings and the
+      # `dotnet new openigi-mod` template, on nuget.org. The key is nuget.org's Trusted Publishing: no stored
+      # secret, a key minted for this run from its OIDC token, against the policy NUGET_USER (the nuget.org
+      # profile that owns it) set up for this repository and release.yml. A package version pushed there can be
+      # unlisted but never replaced, so a failed push is reported and the release goes on.
+      - name: Sign in to nuget.org
+        id: nuget
+        if: steps.tag.outputs.product != 'launcher' && vars.NUGET_USER != ''
+        continue-on-error: true
+        uses: NuGet/login@v1
+        with:
+          user: ${{ vars.NUGET_USER }}
+
+      - name: Publish the modding SDK
+        if: steps.tag.outputs.product != 'launcher'
+        env:
+          NUGET_API_KEY: ${{ steps.nuget.outputs.NUGET_API_KEY }}
+          VERSION: ${{ steps.tag.outputs.version }}
+        run: |
+          if [ -z "$NUGET_API_KEY" ]; then
+            echo "::notice::No nuget.org sign-in (set the NUGET_USER variable): the modding SDK is not published."
+            exit 0
+          fi
+          rm -rf artifacts/nuget
+          # Through bash, so a script checked out without its executable bit still runs.
+          { bash tools/release/pack-modding-sdk.sh "$VERSION" artifacts/nuget \
+            && dotnet nuget push "artifacts/nuget/*.nupkg" --api-key "$NUGET_API_KEY" \
+              --source https://api.nuget.org/v3/index.json --skip-duplicate; } \
+            || echo "::warning::The modding SDK did not publish."
+
+      - name: Summarise
+        env:
+          CHANNEL: ${{ steps.tag.outputs.channel }}
+        run: |
+          {
+            echo "### Released $TAG on the $CHANNEL channel"
+            echo
+            echo "| Archive | Size |"
+            echo "|---|---:|"
+            jq -r '.assets[] | "| \(.name) | \(.size / 1048576 | floor) MB |"' artifacts/release/release.json
+            echo
+            cat "$RUNNER_TEMP/notes/notes.md"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # The dedicated server's container, made from the release's own Linux server. Built on every game release so a broken
+  # image is caught; pushed to ghcr.io/openigi/server only once the PUBLISH_SERVER_IMAGE variable is set to true.
+  server-image:
+    needs: publish
+    if: needs.publish.outputs.product == 'game'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: refs/tags/${{ inputs.tag || github.ref_name }}
+
+      - name: Fetch the server
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.publish.outputs.version }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          mkdir -p artifacts/server
+          gh release download "$TAG" --pattern "openigi-server-$VERSION-linux-x64.tar.gz" --dir artifacts/server
+          tar -C artifacts/server -xzf "artifacts/server/openigi-server-$VERSION-linux-x64.tar.gz"
+
+      - uses: docker/login-action@v3
+        if: vars.PUBLISH_SERVER_IMAGE == 'true'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: tools/server/Dockerfile
+          build-args: SERVER=artifacts/server/openigi-server-${{ needs.publish.outputs.version }}-linux-x64
+          push: ${{ vars.PUBLISH_SERVER_IMAGE == 'true' }}
+          tags: |
+            ghcr.io/openigi/server:${{ needs.publish.outputs.version }}
+            ${{ needs.publish.outputs.channel == 'stable' && 'ghcr.io/openigi/server:latest' || 'ghcr.io/openigi/server:beta' }}
+
+  # The site lists what is now on GitHub: the feeds, and for a game release its browser build.
+  site:
+    needs: publish
+    uses: ./.github/workflows/site.yml
+    secrets: inherit
+
+  # The point of all this: the launcher sees it.
+  check:
+    needs: [publish, site]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check the site offers it
+        env:
+          VERSION: ${{ needs.publish.outputs.version }}
+          CHANNEL: ${{ needs.publish.outputs.channel }}
+          PRODUCT: ${{ needs.publish.outputs.product }}
+        run: |
+          # A game release must be the channel's newest; a launcher release the feed's launcher. GitHub Pages caches
+          # for up to ten minutes, which the cache-busting query sidesteps.
+          field=.latest.version; [ "$PRODUCT" = launcher ] && field=.launcher.version
+          for attempt in $(seq 1 30); do
+            latest=$(curl -fsSL "https://openigi.com/v1/channels/$CHANNEL?release=${{ github.run_id }}-$attempt" | jq -r "$field // empty" || true)
+            [ "$latest" = "$VERSION" ] && { echo "openigi.com offers $VERSION on $CHANNEL"; exit 0; }
+            sleep 20
+          done
+          echo "::error::openigi.com still offers '${latest:-nothing}' on $CHANNEL"
+          exit 1

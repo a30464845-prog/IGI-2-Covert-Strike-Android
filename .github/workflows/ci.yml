@@ -1,0 +1,156 @@
+name: CI
+
+# Every pull request into develop or master, and every push to develop. master is not built on push: it only
+# ever receives develop's commits, already tested here, and a release tests its tag again before publishing.
+on:
+  pull_request:
+    branches: [develop, master]
+  push:
+    branches: [develop]
+  workflow_dispatch:
+
+# A newer commit supersedes the run in flight for its pull request or branch.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: read
+
+env:
+  NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
+
+# Every job runs on GitHub's own runners, which a public repository has for free, so a pull request from a fork is
+# built and tested like any other.
+# Steps run in bash everywhere: a job container's default shell is sh, which has no arrays or ${x::n}.
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    name: build-and-test
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    container:
+      image: ghcr.io/openigi/ci:latest
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/cache@v6
+        with:
+          path: .nuget/packages
+          key: nuget-${{ hashFiles('Directory.Packages.props', 'global.json', '**/*.csproj') }}
+          restore-keys: nuget-
+
+      - name: Restore
+        run: dotnet restore OpenIGI.slnx
+
+      - name: Build
+        run: dotnet build OpenIGI.slnx --configuration Release --no-restore
+
+      # No retail data and no GPU here: the tests that need either skip themselves and say why. OpenGL draws
+      # in software (Mesa's llvmpipe) on a virtual X server, where the image has one.
+      - name: Test
+        env:
+          # No sound device on a runner: OpenAL's silent backend, so audio start-up cannot take the host down.
+          ALSOFT_DRIVERS: "null"
+        run: >
+          $(command -v xvfb-run > /dev/null && echo "xvfb-run -a")
+          dotnet test OpenIGI.slnx --configuration Release --no-build
+          --logger "trx;LogFilePrefix=results" --results-directory test-results
+
+      - name: Summarise the tests
+        if: always()
+        run: python3 tools/ci/test-summary.py test-results >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Keep the results of a failed run
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-results
+          path: test-results/*.trx
+          retention-days: 7
+
+  # The compiled shaders and the WebGPU bindings are generated and committed, so a contributor without
+  # slangc can still build; this is what stops either going stale against its source.
+  generated:
+    name: generated-artifacts
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    container:
+      image: ghcr.io/openigi/ci:latest
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/cache@v6
+        with:
+          path: .nuget/packages
+          key: nuget-${{ hashFiles('Directory.Packages.props', 'global.json', '**/*.csproj') }}
+          restore-keys: nuget-
+
+      # The release is read out of the manifest, so the compiler installed here and the one the output was
+      # produced with cannot drift apart without the check saying so.
+      - name: Install slangc
+        run: |
+          pinned=$(jq -r .slangVersion src/Rendering/OpenIGI.Shaders/ShaderModules.json)
+          release=${pinned%%-*}
+          echo "Pinned slang release: $release (from $pinned)"
+          mkdir -p "$RUNNER_TEMP/slang"
+          curl -fsSL "https://github.com/shader-slang/slang/releases/download/v$release/slang-$release-linux-x86_64.tar.gz" \
+            | tar -xz -C "$RUNNER_TEMP/slang"
+          echo "OPENIGI_SLANGC=$RUNNER_TEMP/slang/bin/slangc" >> "$GITHUB_ENV"
+
+      # DXIL is checked byte for byte too, so the DXC slangc hands it to is pinned in the same manifest. Its
+      # asset names carry the build's date, not the version, so they are read off the tagged release.
+      # The release is read through the API with the run's token: unsigned, every job on the runner's address shares 60
+      # calls an hour, and a busy day runs out (403).
+      - name: Install DXC
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          pinned=$(jq -r .dxcVersion src/Rendering/OpenIGI.Shaders/ShaderModules.json)
+          echo "Pinned DXC release: v$pinned"
+          url=$(curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/microsoft/DirectXShaderCompiler/releases/tags/v$pinned" \
+            | jq -r '.assets[] | select(.name | test("^linux_dxc_.*\\.tar\\.gz$")) | .browser_download_url' | head -n1)
+          mkdir -p "$RUNNER_TEMP/dxc"
+          curl -fsSL "$url" | tar -xz -C "$RUNNER_TEMP/dxc"
+          echo "OPENIGI_DXC=$RUNNER_TEMP/dxc" >> "$GITHUB_ENV"
+
+      - name: Check the committed shaders
+        run: dotnet run --project tools/OpenIGI.Tools.ShaderBuild --configuration Release -- --check
+
+      - name: Check the committed WebGPU bindings
+        run: dotnet run --project tools/OpenIGI.Tools.WebGpuBind --configuration Release -- --check
+
+  # The browser build is published, never built by the solution; this proves it still publishes, exactly as
+  # a release publishes it. Ahead-of-time compilation is not optional here: interpreted, every P/Invoke in
+  # the assemblies enters the native table, including ones the browser's WebGPU shim does not provide.
+  web:
+    name: web-publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    container:
+      image: ghcr.io/openigi/ci:latest
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/cache@v6
+        with:
+          path: .nuget/packages
+          key: nuget-web-${{ hashFiles('Directory.Packages.props', 'global.json', '**/*.csproj') }}
+          restore-keys: nuget-
+
+      - name: Publish
+        run: dotnet publish apps/OpenIGI.Web --configuration Release --output "$RUNNER_TEMP/web"

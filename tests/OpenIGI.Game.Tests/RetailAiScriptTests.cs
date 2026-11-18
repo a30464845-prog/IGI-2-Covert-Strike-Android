@@ -1,0 +1,284 @@
+using OpenIGI.Game.Ai;
+using OpenIGI.Scripting.Qsc;
+using OpenIGI.Scripting.Qvm;
+using OpenIGI.Scripting.Vocabulary;
+using OpenIGI.TestSupport;
+using Xunit;
+
+namespace OpenIGI.Game.Tests;
+
+/// <summary>
+/// Checks the AI vocabulary against every AI script an installation ships — the nine archetypes, the
+/// settings table and the per-task overrides under each level's <c>ai/</c>.
+/// </summary>
+/// <remarks>
+/// This is the test that makes <see cref="AiScriptApi"/> worth transcribing separately from the AI runtime:
+/// if a name or an arity in the table is wrong, a shipped script disagrees with it here, long before any
+/// behaviour is implemented.
+/// </remarks>
+public sealed class RetailAiScriptTests
+{
+    /// <summary>
+    /// Every <c>AIAction_*</c> or <c>AIFunction_*</c> name any shipped AI script mentions is one of the
+    /// fifty-five, and every <c>AI*</c> constant it mentions is one the module registers.
+    /// </summary>
+    [RequiresGameDataFact]
+    public void EveryAiNameAScriptMentionsIsInTheTable()
+    {
+        List<string> unknown = [];
+        HashSet<string> nativesSeen = new(StringComparer.Ordinal);
+        HashSet<string> constantsSeen = new(StringComparer.Ordinal);
+        int scripts = 0;
+
+        foreach (string path in AiScripts())
+        {
+            QvmProgram program = QvmProgram.Read(File.ReadAllBytes(path));
+            scripts++;
+
+            foreach (string? symbol in program.SymbolNames)
+            {
+                if (symbol is null)
+                {
+                    continue;
+                }
+
+                if (symbol.StartsWith("AIAction_", StringComparison.Ordinal) ||
+                    symbol.StartsWith("AIFunction_", StringComparison.Ordinal))
+                {
+                    if (AiScriptApi.TryGetNative(symbol, out _))
+                    {
+                        nativesSeen.Add(symbol);
+                    }
+                    else
+                    {
+                        unknown.Add($"{Name(path)}: native {symbol}");
+                    }
+                }
+                else if (symbol.StartsWith("AIEVENT_", StringComparison.Ordinal) ||
+                         symbol.StartsWith("AITYPE_", StringComparison.Ordinal) ||
+                         symbol.StartsWith("AIACTIONFLAG_", StringComparison.Ordinal) ||
+                         symbol.StartsWith("AIALARMACCESS_", StringComparison.Ordinal) ||
+                         symbol.StartsWith("HUMANAI_", StringComparison.Ordinal))
+                {
+                    if (AiScriptApi.TryGetConstant(symbol, out _))
+                    {
+                        constantsSeen.Add(symbol);
+                    }
+                    else
+                    {
+                        unknown.Add($"{Name(path)}: constant {symbol}");
+                    }
+                }
+            }
+        }
+
+        Assert.Empty(unknown);
+        Assert.True(scripts > 800, $"only found {scripts} AI scripts");
+
+        // The shipped scripts exercise most of the API but not all of it, which is worth knowing rather
+        // than asserting away: an unused native is a lead, not a mistake.
+        Assert.NotEmpty(nativesSeen);
+        Assert.NotEmpty(constantsSeen);
+    }
+
+    /// <summary>
+    /// A call site's argument count matches what the registrar declares, for every AI native call in every
+    /// shipped script.
+    /// </summary>
+    /// <remarks>
+    /// The callee is not an operand of <c>CALL</c> — the interpreter <b>pops it off the stack</b> — so the
+    /// name comes from the instruction before, which is a <c>PUSHII</c>/<c>PUSHIIB</c>/<c>PUSHIIW</c> carrying
+    /// a <em>symbol</em> index. Note the family: <c>PUSHSI*</c> is the near-identical <em>string</em>-index
+    /// push, and using it resolves no call sites at all rather than failing loudly.
+    /// </remarks>
+    [RequiresGameDataFact]
+    public void EveryCallSiteMatchesTheDeclaredArity()
+    {
+        List<string> mismatches = [];
+        Dictionary<string, int> callCounts = new(StringComparer.Ordinal);
+
+        foreach (string path in AiScripts())
+        {
+            QvmProgram program = QvmProgram.Read(File.ReadAllBytes(path));
+            QvmInstruction? previous = null;
+
+            foreach (QvmInstruction instruction in QvmDisassembler.Decode(program))
+            {
+                if (instruction.Opcode == QvmOpcode.Call &&
+                    previous is not null &&
+                    previous.Opcode is QvmOpcode.PushII or QvmOpcode.PushIIB or QvmOpcode.PushIIW &&
+                    program.TryGetSymbolName(previous.Integer, out string callee) &&
+                    AiScriptApi.TryGetNative(callee, out AiNative native))
+                {
+                    callCounts[callee] = callCounts.GetValueOrDefault(callee) + 1;
+                    if (instruction.ArgumentOffsets.Count != native.ArgumentCount)
+                    {
+                        mismatches.Add(
+                            $"{Name(path)}+0x{instruction.Offset:X}: {callee} passes " +
+                            $"{instruction.ArgumentOffsets.Count}, declared {native.ArgumentCount}");
+                    }
+                }
+
+                previous = instruction;
+            }
+        }
+
+        Assert.Empty(mismatches);
+
+        // Enough call sites resolved that the arity check means something.
+        Assert.True(callCounts.Count >= 20, $"only resolved {callCounts.Count} distinct AI natives at call sites");
+        Assert.True(callCounts.Values.Sum() > 1000, $"only {callCounts.Values.Sum()} AI call sites");
+    }
+
+    /// <summary>
+    /// Every argument every shipped AI script passes fits the typed signature the editor builds pins from: no text where a
+    /// number is read, no number where text is read, no constant of the wrong family.
+    /// </summary>
+    [RequiresGameDataFact]
+    public void EveryCallSiteFitsTheTypedSignature()
+    {
+        ScriptVocabulary vocabulary = new ScriptVocabulary().Add(AiScriptVocabulary.Signatures);
+        foreach (ConstantFamily family in AiScriptVocabulary.Families)
+        {
+            vocabulary.Add(family);
+        }
+
+        List<string> problems = [];
+        int scripts = 0;
+        foreach (string path in AiScripts())
+        {
+            QscScript script = QscDecompiler.Decompile(File.ReadAllBytes(path));
+            scripts++;
+            problems.AddRange(ScriptCallChecker.Check(script, vocabulary).Select(p => $"{Name(path)}: {p.Message}"));
+        }
+
+        Assert.True(scripts > 800, $"only found {scripts} AI scripts");
+        Assert.Empty(problems.Distinct(StringComparer.Ordinal));
+    }
+
+    /// <summary>
+    /// The nine archetype scripts the engine names all exist, and <c>observer</c> and <c>radioguard</c> ship
+    /// beside them without the engine or any shipped script ever naming either.
+    /// </summary>
+    [RequiresGameDataFact]
+    public void TwoArchetypeScriptsShipDead()
+    {
+        string aiDirectory = Path.Combine(GameData.RequireRoot(), "common", "ai");
+
+        foreach (AiArchetype archetype in Enum.GetValues<AiArchetype>())
+        {
+            string file = AiScriptApi.ScriptPath(archetype)["LOCAL:common/ai/".Length..].Replace(".qsc", ".qvm");
+            Assert.True(File.Exists(Path.Combine(aiDirectory, file)), file);
+        }
+
+        Assert.True(File.Exists(Path.Combine(aiDirectory, "observer.qvm")));
+        Assert.True(File.Exists(Path.Combine(aiDirectory, "radioguard.qvm")));
+
+        // Nothing anywhere in the shipped data names either one.
+        List<string> mentions = [];
+        foreach (string path in GameData.EnumerateFiles("*.qvm"))
+        {
+            QvmProgram program = QvmProgram.Read(File.ReadAllBytes(path));
+            foreach (string? text in program.Strings)
+            {
+                if (text is not null &&
+                    (text.Contains("observer", StringComparison.OrdinalIgnoreCase) ||
+                     text.Contains("radioguard", StringComparison.OrdinalIgnoreCase)))
+                {
+                    mentions.Add($"{Name(path)}: {text}");
+                }
+            }
+        }
+
+        Assert.Empty(mentions);
+    }
+
+    /// <summary>
+    /// A per-task AI override is named by the owning task's id, so a level's <c>ai/</c> holds files whose
+    /// numbers are task ids — the same rule the nav graph's file names follow.
+    /// </summary>
+    [RequiresGameDataFact]
+    public void ThePerTaskOverridesAreNamedByTaskId()
+    {
+        string level1 = Path.Combine(GameData.RequireRoot(), "missions", "location0", "level1", "ai");
+        string[] files = Directory.GetFiles(level1, "*.qvm");
+
+        Assert.NotEmpty(files);
+        foreach (string file in files)
+        {
+            string stem = Path.GetFileNameWithoutExtension(file);
+            Assert.True(
+                int.TryParse(stem, System.Globalization.CultureInfo.InvariantCulture, out int id) && id > 0,
+                $"'{stem}' is not a task id");
+            Assert.Equal($"MISSION:AI/{id}.qsc", AiScriptApi.MissionScriptPath(id));
+        }
+    }
+
+    /// <summary>
+    /// <b>No shipped AI script ever configures the secondary view cone.</b> All four
+    /// <c>AIFunction_SetSecondary*</c> natives are registered and none is called anywhere, so every AI in the
+    /// game peers through the constructor's peripheral cone unchanged — about ±63° horizontally at 12.5 m,
+    /// with no extra reach when alerted.
+    /// </summary>
+    [RequiresGameDataFact]
+    public void NoScriptTouchesTheSecondaryViewCone()
+    {
+        string[] secondary =
+        [
+            "AIFunction_SetSecondaryViewLength",
+            "AIFunction_SetSecondaryAlarmViewLength",
+            "AIFunction_SetSecondaryViewAlpha",
+            "AIFunction_SetSecondaryViewGamma",
+        ];
+
+        // Every one of them really is registered, so this is silence rather than a missing table entry.
+        foreach (string name in secondary)
+        {
+            Assert.True(AiScriptApi.TryGetNative(name, out _), name);
+        }
+
+        List<string> found = [];
+        int primaryCalls = 0;
+
+        foreach (string path in AiScripts())
+        {
+            QvmProgram program = QvmProgram.Read(File.ReadAllBytes(path));
+            foreach (string? symbol in program.SymbolNames)
+            {
+                if (symbol is null)
+                {
+                    continue;
+                }
+
+                if (Array.IndexOf(secondary, symbol) >= 0)
+                {
+                    found.Add($"{Name(path)}: {symbol}");
+                }
+                else if (symbol is "AIFunction_SetViewLength" or "AIFunction_SetViewAlpha"
+                         or "AIFunction_SetViewGamma" or "AIFunction_SetAlarmViewLength")
+                {
+                    primaryCalls++;
+                }
+            }
+        }
+
+        Assert.Empty(found);
+        Assert.True(primaryCalls > 0, "no script configures the primary cone either, which cannot be right");
+    }
+
+    private static IEnumerable<string> AiScripts()
+    {
+        string root = GameData.RequireRoot();
+        foreach (string path in GameData.EnumerateFiles("*.qvm"))
+        {
+            string relative = Path.GetRelativePath(root, path).Replace('\\', '/');
+            if (relative.Contains("/ai/", StringComparison.OrdinalIgnoreCase) ||
+                relative.StartsWith("ai/", StringComparison.OrdinalIgnoreCase))
+            {
+                yield return path;
+            }
+        }
+    }
+
+    private static string Name(string path) => Path.GetFileName(path);
+}

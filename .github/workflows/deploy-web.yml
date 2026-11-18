@@ -1,0 +1,94 @@
+name: Deploy web
+
+# Builds the browser build alone and puts it on the site, without a release: no desktop downloads, nothing new for
+# the launcher. For a web-only fix between releases. The build replaces the browser build of a release already
+# published (by default the newest one on the branch) and the site is built again; the site shows the newest stable
+# release's browser build at openigi.com and the newest release's at openigi.com/beta/, so which of the two this
+# changes follows from the version. Replacing it again with the release's own tag rebuilt is the way back.
+#
+# Run it with Run workflow: a stable version from master, a beta version from develop or master, as releases are.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: The release version whose browser build is replaced (empty for the newest release tag on the branch)
+        type: string
+        required: false
+
+permissions:
+  contents: write
+  packages: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: deploy-web
+  cancel-in-progress: false
+
+env:
+  NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    name: build web
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    container:
+      image: ghcr.io/openigi/ci:latest
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Read the target
+        id: target
+        env:
+          VERSION: ${{ inputs.version }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          # The newest release on the branch: a stable tag on master, a stable or beta tag on develop.
+          if [ -z "$VERSION" ]; then
+            pattern='^v[0-9]+\.[0-9]+\.[0-9]+(-beta\.[0-9]+)?$'
+            tag="$(git tag --merged HEAD --sort=-v:refname -l 'v*' | grep -E "$pattern" | head -n 1 || true)"
+            [ -n "$tag" ] || { echo "::error::No release tag on $BRANCH to deploy under; give a version."; exit 1; }
+            VERSION="${tag#v}"
+          fi
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-beta\.[0-9]+)?$ ]] || { echo "::error::'$VERSION' is not a release version."; exit 1; }
+
+          # The same rule as a release: what players of a stable release see comes from master.
+          case "$VERSION/$BRANCH" in
+            *-beta.*/develop | */master) ;;
+            *) echo "::error::$VERSION deploys from $([[ "$VERSION" == *-beta.* ]] && echo 'develop or master' || echo master), not $BRANCH."; exit 1 ;;
+          esac
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Replacing the browser build of v$VERSION with $(git rev-parse --short HEAD) on $BRANCH." >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/cache@v6
+        with:
+          path: .nuget/packages
+          key: nuget-release-${{ hashFiles('Directory.Packages.props', 'global.json', '**/*.csproj') }}
+          restore-keys: nuget-
+
+      - name: Package
+        run: |
+          rm -rf artifacts/web
+          tools/release/package.sh web browser-wasm "${{ steps.target.outputs.version }}"
+
+      - name: Replace the release's browser build
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.target.outputs.version }}
+        run: gh release upload "v$VERSION" "artifacts/web/openigi-web-$VERSION.tar.gz" --clobber --repo "$GITHUB_REPOSITORY"
+
+  site:
+    needs: build
+    uses: ./.github/workflows/site.yml
+    secrets: inherit

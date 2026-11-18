@@ -1,0 +1,149 @@
+# Contributing to OpenIGI
+
+Thanks for helping build a faithful, open Project I.G.I. engine. Please read this before opening a PR.
+
+## Golden rules
+
+1. **Preserve 1:1 behaviour.** The engine has a determinism contract: fixed 30 Hz ticks driven from
+   absolute time targets, truncate-toward-zero float→int conversion, a catch-up cap of 10, one render
+   per tick, `Last`-shadow edge detection, cursor-patching deletion, and `double` world positions. A
+   "cleaner" change that alters any of these is a **bug**, however much nicer it reads.
+2. **Keep the core backend-free.** `OpenIGI.Engine` and `OpenIGI.Game` may reference only the
+   abstraction projects — `Rendering`, `Audio`, `Input`, `Platform` — and never a concrete backend.
+   Backends are wired together in the app composition root.
+3. **Document every public member.** The build fails on missing XML docs (`CS1591` is an error) and on
+   any warning at all. Run `dotnet build` before pushing.
+4. **The binary is the source of truth.** Behavioural facts come from the original executable, not
+   from what would be reasonable. Say where a fact came from — the address of the function you read,
+   or the measurement you took — in the code comment or the commit message that introduces it.
+
+## Reverse-engineering workflow
+
+The original `IGI.exe` is the authority. Community reverse-engineering projects and the later I.G.I. 2
+binaries are useful for generating hypotheses and for naming things, but they are corroborators rather
+than sources: I.G.I. 2 is a later version of the same engine with whole systems rewritten, so a name
+from its symbols tells you what Innerloop called something in the sequel, not what this game does.
+Confirm against the real thing before relying on it.
+
+Prefer confirming against **real game files** (`IGI_GAME_PATH`) over assumptions, and prefer measuring
+the running original over reading the decompiler when the two could disagree.
+
+### The binary the addresses refer to
+
+Comments throughout the code cite addresses in the original executable — `0x416260`, `sub_44F410`.
+An address means nothing without the build it belongs to, and this game shipped **no version
+resource**, so the hash is its identity:
+
+| | |
+|---|---|
+| File | `IGI.exe`, 1,384,448 bytes |
+| SHA-256 | `c74f390780e7ec23bd58e9915cdd94006e579c66083830c6908dbecb963bd0ce` |
+| Linked | 2000-11-23 19:49:26 UTC (`TimeDateStamp` `0x3A1D74C6`) |
+| Image base | `0x00400000`, PE32 / i386 |
+
+```sh
+# Windows
+Get-FileHash "IGI.exe" -Algorithm SHA256
+# Linux / macOS
+sha256sum IGI.exe
+```
+
+Addresses are written as virtual addresses at that image base, which is what a disassembler shows by
+default — no rebasing needed. The section layout tells you what kind of thing an address names:
+
+| Section | Range | Holds |
+|---|---|---|
+| `.text` | `0x00401000`–`0x00532510` | code — a function |
+| `.rdata` | `0x00533000`–`0x005358F6` | constants |
+| `.data` | `0x00536000`–`0x00C32558` | globals |
+| `.rsrc` | `0x00C33000`–`0x00C34E40` | resources |
+
+Unless a reference note explicitly identifies another executable fingerprint, addresses refer to the
+build above. If your copy hashes differently, document that fingerprint rather than silently
+correcting addresses against a build nobody else has.
+
+Keep working notebooks and copyrighted reference captures outside the repository. What a reader needs
+to trust an implementation, such as the original's address for the behaviour and any non-obvious
+constraint, belongs in the code comments beside it.
+
+## Content packs and mods
+
+They are two separate systems, and they stay separate in names, folders, contracts and UI. Runtime
+components, the third kind of download, are neither.
+
+- **Content** is asset overlays: folders that mirror the game's paths and replace its files.
+  - They install to `<Library>/content/<id>/files`, are described by `ContentManifest`
+    (`src/Core/OpenIGI.Releases`), and are listed on the launcher's Content tab.
+  - The game stacks them through `ResourceOverrides` in a per-game load order that the launcher hands it as a
+    `ContentProfile` (`src/Core/OpenIGI.Core/Content`). The profile is named in `OPENIGI_CONTENT_PROFILE`, or
+    passed with `-contentprofile <file>`.
+  - Resolution: the highest enabled layer that has a path wins it, and the layers below fill the gaps.
+    Within a layer a loose file beats an archived entry, and two archives carrying one path resolve
+    alphabetically by archive path. The game's own file comes last.
+  - The game folder's `overrides` is one of the layers ("Local overrides"). `-content <dir>` (repeatable) adds
+    layers on top for development. The legacy `OPENIGI_OVERRIDES` is a layer only when no profile is given.
+    The launcher still sets it to the top enabled pack, for game builds from before load orders.
+  - F8 / `r_overrides` shows the originals. The `content` console command lists layers and conflicts and
+    switches a layer live.
+- **Mods** are folders holding a `mod.json` (`ModManifest`, `src/Core/OpenIGI.Core/Content`), usually with an
+  assembly built against the modding API (`OpenIGI.Modding`). See [sdk/README.md](sdk/README.md).
+  - They install to `<Library>/mods/<id>/files`, are published as content packs of kind `Mod` listed apart at
+    `/v1/mods`, and are listed on the launcher's Mods tab. A mod's author tries a build from
+    `<Library>/mods/local/<folder>`.
+  - The game loads the mods a `ModProfile` switches on, per game, in its order, named in
+    `OPENIGI_MOD_PROFILE`. Without one it scans `mods/` beside the executable, or the folder in `OPENIGI_MODS`.
+    `OPENIGI_MODS=off` plays the games as they ship.
+  - Community mods are published through the mods index, a separate repository (scaffold in `sdk/mods-index`).
+    A mod with code is built there from its public source at the commit its version names, never uploaded as
+    built.
+  - A mod is never loaded through `ResourceOverrides`.
+  - Content never runs code.
+- **Runtime components** are vendor-signed native libraries the engine loads, the first being NVIDIA's
+  Streamline runtime (DLSS, ray reconstruction, frame generation, Reflex).
+  - They are published as content packs of kind `Runtime` (`ContentKind`, `src/Core/OpenIGI.Releases`) for the
+    game id `engine`, which no game has, so a launcher from before kinds never offers one.
+  - They name the platforms their libraries are built for (`--platform win-x64`); a launcher on any other
+    neither lists nor downloads them. The tool refuses a runtime pack that names none.
+  - They install to `<Library>/runtime/<id>/files`, stand in no load order, and reach the game through a
+    variable naming their folder (`RuntimePacks.VariableFor`; `OPENIGI_STREAMLINE_PATH` for Streamline).
+  - The engine loads a runtime's libraries by absolute path and only after checking the signature of every
+    library in the folder: NVIDIA's, or Microsoft's for the C++ runtime they carry. Anything else, and the
+    whole folder is refused.
+  - The release tool refuses a runtime pack holding configuration (`*.json`), logs or a development build.
+  - None of this is content: content still never runs code, and a runtime is never a mod. Nothing a runtime
+    pack carries is in this repository or its builds; a development checkout fetches it with
+    `tools/fetch-streamline.ps1`.
+
+## Tests
+
+- Add unit tests for logic, and **golden tests** for every format reader.
+- Golden tests that need real assets must read `IGI_GAME_PATH` and **skip**, not fail, when it is
+  unset. A checkout with no game data has to build and test green.
+- **Never commit copyrighted game data.** Only tiny synthetic fixtures, or ones extracted from the
+  executable at test time, under `tests/**/fixtures/`. This includes derived data: textures with a
+  filter over them are still Innerloop's art.
+- Determinism-sensitive systems get a "same inputs, same state hash" test.
+
+## Code style
+
+- `.editorconfig` is enforced by the build. File-scoped namespaces, explicit accessibility,
+  `_camelCase` private fields, braces always.
+- Favour small single-responsibility types over large ones, and shared helpers over duplication.
+- Central Package Management: add package **versions** in `Directory.Packages.props` and reference
+  them without a version in the `.csproj`.
+- Comments should explain **why**, especially where the code looks wrong but matches the original.
+  A divergence from the original needs a comment saying that it is one and what it buys.
+
+## Commits and PRs
+
+- One concern per PR where possible, and keep the build green with tests passing.
+- Write commit messages that explain the reasoning, not just the change. Most of what is known about
+  this engine lives in its history, so a message that records why something is the way it is is worth
+  more than the diff it accompanies.
+- Do not add AI assistant attribution trailers to commits.
+
+## Legal
+
+By contributing you agree your work is licensed under **GPL-3.0**. Do not paste original game source,
+decompiler output or disassembly into the codebase — describe the behaviour and reimplement it
+cleanly. Contributions containing game assets or verbatim decompiler output will not be accepted.

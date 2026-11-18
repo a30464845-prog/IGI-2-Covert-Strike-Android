@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="OpenIGI.Net.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\Core\OpenIGI.Core\OpenIGI.Core.csproj" />
+    <!-- The master server's request signing (SignedRequest), which a player's key signs for: accounts, from the game and the launcher. -->
+    <ProjectReference Include="..\..\Core\OpenIGI.Releases\OpenIGI.Releases.csproj" />
+  </ItemGroup>
+
+</Project>

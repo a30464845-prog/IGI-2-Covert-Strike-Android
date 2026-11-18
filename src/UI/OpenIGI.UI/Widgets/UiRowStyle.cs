@@ -1,0 +1,225 @@
+using OpenIGI.Core.Graphics;
+using OpenIGI.UI.Animation;
+using OpenIGI.UI.Layout;
+using OpenIGI.UI.Text;
+
+namespace OpenIGI.UI.Widgets;
+
+/// <summary>
+/// The shared look of a settings row: a caption on the left, its control on the right, and a faint wash
+/// under the whole row while the pointer or focus is on it.
+/// </summary>
+/// <remarks>
+/// Every row-shaped control — toggle, slider, select, key binding — draws its frame through here, so a
+/// column of mixed rows lines up to the pixel and lights the same way whichever kind is under the cursor.
+/// The design defines only a hover state; focus from the keyboard or a pad looks exactly like it, which is
+/// what lets a player who switches between mouse and pad never lose track of where they are.
+/// </remarks>
+public static class UiRowStyle
+{
+    /// <summary>A row's height, in design units.</summary>
+    public const float Height = 46f;
+
+    /// <summary>The inset of a row's caption and control from its edges, in design units.</summary>
+    public const float Inset = 10f;
+
+    /// <summary>The least room kept between a row's caption and its control, in design units.</summary>
+    public const float Gap = 16f;
+
+    /// <summary>How lit a row is: 1 under the pointer or focus, easing in and out with focus.</summary>
+    /// <param name="control">The row.</param>
+    /// <returns>The highlight, 0 to 1.</returns>
+    public static float Highlight(Control control)
+    {
+        ArgumentNullException.ThrowIfNull(control);
+        return MathF.Max(control.Visual.Focus, control.IsPointerOver ? 1f : 0f);
+    }
+
+    /// <summary>Measures a row: the available width, and the theme's row height or the caption's, whichever is taller.</summary>
+    /// <param name="control">The row.</param>
+    /// <param name="context">The layout context.</param>
+    /// <param name="available">The space offered.</param>
+    /// <returns>The row's size.</returns>
+    public static UiVec2 Measure(Control control, LayoutContext context, UiVec2 available)
+    {
+        ArgumentNullException.ThrowIfNull(control);
+        ArgumentNullException.ThrowIfNull(context);
+        UiTheme theme = control.Theme;
+        float caption = theme.Body.LineHeight(context.Px(theme.BodyTextSize)) + context.Px(12f);
+        if (ShowsHint(control))
+        {
+            caption += context.Px(3f) + theme.Body.LineHeight(context.Px(HintSize(theme)));
+        }
+
+        return new UiVec2(available.X, MathF.Max(context.Px(theme.RowHeight), caption));
+    }
+
+    /// <summary>Draws the row's hover wash and its caption.</summary>
+    /// <param name="painter">The painter.</param>
+    /// <param name="control">The row.</param>
+    /// <param name="caption">The caption, set on the left.</param>
+    /// <param name="highlight">How lit the row is, from <see cref="Highlight"/>.</param>
+    /// <param name="controlLeft">
+    /// Where the row's control begins, in pixels. The caption and its hint are cut short with an ellipsis
+    /// before it, so a narrow window never draws them under the control; omitted, they may use the whole row.
+    /// </param>
+    public static void DrawFrame(UiPainter painter, Control control, string caption, float highlight, float controlLeft = float.PositiveInfinity)
+    {
+        ArgumentNullException.ThrowIfNull(painter);
+        ArgumentNullException.ThrowIfNull(control);
+        UiTheme theme = control.Theme;
+        float appear = control.Visual.Appear;
+
+        UiRect bounds = control.Bounds;
+        if (theme.RowDividers)
+        {
+            float t = painter.Context.Px(1f);
+            painter.FillRect(new UiRect(bounds.X, bounds.Bottom - t, bounds.Width, t), UiPalette.White((theme.Large ? 0.07f : 0.05f) * appear));
+        }
+
+        if (highlight > 0.001f)
+        {
+            painter.FillRect(bounds, theme.Large ? UiPalette.White(0.07f * highlight * appear) : UiPalette.Fade(theme.FocusFill, highlight * appear));
+        }
+
+        // The row in focus is ringed: a pad or a keyboard moves it, and a wash alone is lost over a bright level.
+        if (theme.Large && control.Visual.Focus > 0.001f)
+        {
+            painter.StrokeRect(bounds, painter.Context.Px(2f), UiPalette.Fade(theme.AccentHover, control.Visual.Focus * appear));
+        }
+
+        if (caption.Length == 0)
+        {
+            return;
+        }
+
+        float sizePx = painter.Context.Px(theme.BodyTextSize);
+        Bgra32 color = !control.IsEnabled ? theme.TextDisabled : Interpolate.Lerp(theme.TextLabel, theme.TextBright, highlight);
+        float x = bounds.X + painter.Context.Px(theme.RowInset);
+        float room = MathF.Min(bounds.Right - painter.Context.Px(theme.RowInset), controlLeft - painter.Context.Px(Gap)) - x;
+        // The large look sets a row's caption a weight up, so it leads the row, and as a sentence rather than a title.
+        Text.UiFont face = theme.Large ? theme.BodyStrong : theme.Body;
+        if (theme.Large)
+        {
+            caption = SentenceCase(caption);
+        }
+
+        caption = TextFit.ToWidth(face, caption, sizePx, room);
+        if (!ShowsHint(control))
+        {
+            float y = bounds.Y + ((bounds.Height - face.LineHeight(sizePx)) * 0.5f);
+            painter.DrawText(face, caption, new UiVec2(x, y), sizePx, UiPalette.Fade(color, appear));
+            return;
+        }
+
+        // A caption with a quieter line of explanation under it, the pair centred in the row.
+        float hintPx = painter.Context.Px(HintSize(theme));
+        float gap = painter.Context.Px(3f);
+        float block = theme.Body.LineHeight(sizePx) + gap + theme.Body.LineHeight(hintPx);
+        float top = bounds.Y + ((bounds.Height - block) * 0.5f);
+        painter.DrawText(face, caption, new UiVec2(x, top), sizePx, UiPalette.Fade(color, appear));
+        string hint = TextFit.ToWidth(theme.Body, control.Hint, hintPx, room);
+        painter.DrawText(theme.Body, hint, new UiVec2(x, top + theme.Body.LineHeight(sizePx) + gap), hintPx, UiPalette.Fade(theme.Large ? theme.TextSecondary : theme.TextMuted, appear));
+    }
+
+    private static float HintSize(UiTheme theme) => theme.BodyTextSize * 0.89f;
+
+    // Captions already turned, by the caption they were: a page has a few dozen and draws each every frame.
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> Sentences = new(StringComparer.Ordinal);
+
+    /// <summary>Writes a caption as a sentence: <c>Frame Rate Cap</c> is <c>Frame rate cap</c>.</summary>
+    /// <param name="caption">The caption, as a title.</param>
+    /// <returns>
+    /// The caption with every word after the first begun in lower case, but a word that is not plainly a capitalised
+    /// one -- <c>NVIDIA</c>, <c>DLSS</c>, <c>IGI1</c>, <c>F1</c> -- and the word after such a name, which is taken as part of it.
+    /// </returns>
+    public static string SentenceCase(string caption)
+    {
+        ArgumentNullException.ThrowIfNull(caption);
+        if (caption.Length < 2 || caption.IndexOf(' ', StringComparison.Ordinal) < 0 && caption.IndexOf('-', StringComparison.Ordinal) < 0)
+        {
+            return caption;
+        }
+
+        return Sentences.GetOrAdd(caption, static text =>
+        {
+            char[] letters = text.ToCharArray();
+            bool first = true;
+            bool afterName = false;
+            int start = 0;
+            for (int i = 0; i <= letters.Length; i++)
+            {
+                if (i < letters.Length && letters[i] != ' ' && letters[i] != '-')
+                {
+                    continue;
+                }
+
+                int length = i - start;
+                if (length > 0)
+                {
+                    // A plain capitalised word: one capital, then lower-case letters only.
+                    bool plain = char.IsUpper(letters[start]);
+                    for (int k = start + 1; plain && k < i; k++)
+                    {
+                        plain = char.IsLower(letters[k]);
+                    }
+
+                    if (plain && !first && !afterName && length > 1)
+                    {
+                        letters[start] = char.ToLowerInvariant(letters[start]);
+                    }
+
+                    afterName = !plain && length > 1 && char.IsUpper(letters[start]) && !first;
+                    first = false;
+                }
+
+                start = i + 1;
+            }
+
+            return new string(letters);
+        });
+    }
+
+    /// <summary>Gets a value indicating whether a row shows its line of explanation now.</summary>
+    /// <param name="control">The row.</param>
+    /// <returns><see langword="true"/> when it has one and the theme shows it: always, or while the row has the focus or the pointer.</returns>
+    public static bool ShowsHint(Control control)
+    {
+        ArgumentNullException.ThrowIfNull(control);
+        return control.Hint.Length > 0 && control.Theme.RowHints switch
+        {
+            UiRowHints.Always => true,
+            UiRowHints.Focused => control.Visual.Focus > 0.5f || control.IsPointerOver,
+            _ => false,
+        };
+    }
+
+    /// <summary>Gets the y of text centred vertically in a box.</summary>
+    /// <param name="font">The font.</param>
+    /// <param name="sizePx">The text size in pixels.</param>
+    /// <param name="box">The box.</param>
+    /// <returns>The top of the line.</returns>
+    public static float CenterY(Text.UiFont font, float sizePx, UiRect box)
+    {
+        ArgumentNullException.ThrowIfNull(font);
+        return box.Y + ((box.Height - font.LineHeight(sizePx)) * 0.5f);
+    }
+
+    /// <summary>
+    /// Gets the y of uppercase text whose capitals sit centred in a box — what CSS's line box does for a
+    /// label in a flex row, and what keeps a caption from riding high on its descender space.
+    /// </summary>
+    /// <param name="font">The font.</param>
+    /// <param name="sizePx">The text size in pixels.</param>
+    /// <param name="box">The box.</param>
+    /// <returns>The top of the line.</returns>
+    public static float CapsCenterY(Text.UiFont font, float sizePx, UiRect box)
+    {
+        ArgumentNullException.ThrowIfNull(font);
+
+        // Capitals stand about 0.7 of the size above the baseline in the faces the design uses.
+        float capHeight = sizePx * 0.7f;
+        float baseline = box.Y + ((box.Height + capHeight) * 0.5f);
+        return baseline - font.Ascent(sizePx);
+    }
+}

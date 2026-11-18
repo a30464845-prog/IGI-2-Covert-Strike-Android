@@ -1,0 +1,434 @@
+using OpenIGI.Core.Graphics;
+using OpenIGI.UI.Animation;
+using OpenIGI.UI.Drawing;
+using OpenIGI.UI.Focus;
+using OpenIGI.UI.Layout;
+using OpenIGI.UI.Widgets;
+
+namespace OpenIGI.UI.Kit.Widgets;
+
+/// <summary>
+/// One cell of an option strip: a monospaced caption, the value large in the condensed face, a row of
+/// pips marking where the value sits in the list, and an up / down pair to step through it.
+/// </summary>
+/// <remarks>
+/// <para>
+/// The campaign's Difficulty, Time and Weather. A cell is a whole choice at a glance — the pips say how many
+/// options there are and which one this is, so a player never has to cycle through to find out.
+/// </para>
+/// <para>
+/// Up and down step the value while the cell holds focus (they are the arrows drawn on it); left and right
+/// are left to move between cells, so a pad walks the strip the way it reads.
+/// </para>
+/// </remarks>
+public class OptionCycler : Control
+{
+    private readonly List<string> _options;
+    private readonly List<string> _shown;
+    private readonly List<Spring> _pips = [];
+    private UiRect _up;
+    private UiRect _down;
+    private UiVec2 _pointer;
+    private int _selected;
+
+    /// <summary>Initializes a new instance of the <see cref="OptionCycler"/> class.</summary>
+    /// <param name="theme">The theme.</param>
+    /// <param name="label">The caption, shown in capitals.</param>
+    /// <param name="options">The values, in order.</param>
+    /// <param name="selected">The initial value's index.</param>
+    public OptionCycler(UiTheme theme, string label, IEnumerable<string> options, int selected = 0)
+        : base(theme)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        Caption = label ?? string.Empty;
+        Label = Caption.ToUpperInvariant();
+        _options = [.. options];
+        _shown = _options.ConvertAll(o => o.ToUpperInvariant());
+        _selected = _options.Count == 0 ? 0 : Math.Clamp(selected, 0, _options.Count - 1);
+        for (int i = 0; i < _options.Count; i++)
+        {
+            _pips.Add(new Spring(i == _selected ? 1f : 0f, smoothTime: 0.08f));
+        }
+    }
+
+    /// <summary>Raised when the value changes, with its new index.</summary>
+    public event Action<int>? SelectionChanged;
+
+    /// <summary>Gets the caption, in capitals as a strip's cell shows it.</summary>
+    public string Label { get; }
+
+    /// <summary>Gets the caption as given, as a row shows it.</summary>
+    public string Caption { get; }
+
+    /// <summary>Gets the values.</summary>
+    public IReadOnlyList<string> Options => _options;
+
+    /// <summary>Gets or sets the cell's content width, in design units, not counting its padding and arrows.</summary>
+    public float ContentWidth { get; set; } = 150f;
+
+    /// <summary>
+    /// Gets or sets whether the cycler is a row: its label on the left and its value between a left and a right arrow on the
+    /// right, stepped by left and right -- a form's line rather than a cell of a strip.
+    /// </summary>
+    public bool Inline { get; set; }
+
+    /// <summary>Gets or sets the selected value's index.</summary>
+    public int SelectedIndex
+    {
+        get => _selected;
+        set
+        {
+            if (_options.Count == 0)
+            {
+                return;
+            }
+
+            int clamped = Math.Clamp(value, 0, _options.Count - 1);
+            if (clamped == _selected)
+            {
+                return;
+            }
+
+            _selected = clamped;
+            SelectionChanged?.Invoke(_selected);
+        }
+    }
+
+    /// <summary>Steps the value, wrapping at either end.</summary>
+    /// <param name="delta">+1 for the next value, -1 for the previous.</param>
+    public void Step(int delta)
+    {
+        if (_options.Count == 0 || delta == 0)
+        {
+            return;
+        }
+
+        SelectedIndex = ((_selected + Math.Sign(delta)) % _options.Count + _options.Count) % _options.Count;
+    }
+
+    /// <inheritdoc/>
+    public override bool HandleNavigate(NavDirection direction)
+    {
+        switch (direction)
+        {
+            case NavDirection.Up when !Inline:
+            case NavDirection.Right when Inline:
+                Step(1);
+                return true;
+            case NavDirection.Down when !Inline:
+            case NavDirection.Left when Inline:
+                Step(-1);
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    /// <inheritdoc/>
+    public override void ActivateAt(UiVec2 point)
+    {
+        Step(_down.Contains(point) ? -1 : 1);
+        RaiseActivated();
+    }
+
+    /// <inheritdoc/>
+    public override void PointerMoved(UiVec2 point) => _pointer = point;
+
+    /// <inheritdoc/>
+    protected override void OnActivate() => Step(1);
+
+    /// <inheritdoc/>
+    protected override void OnUpdate(float elapsedSeconds)
+    {
+        base.OnUpdate(elapsedSeconds);
+        for (int i = 0; i < _pips.Count; i++)
+        {
+            _pips[i].Target = i == _selected ? 1f : 0f;
+            _pips[i].Update(elapsedSeconds);
+        }
+    }
+
+    /// <inheritdoc/>
+    protected override UiVec2 MeasureContent(LayoutContext context, UiVec2 available)
+    {
+        if (Theme.Large)
+        {
+            return Inline ? UiRowStyle.Measure(this, context, available) : new UiVec2(context.Px(LargeCellWidth), available.Y);
+        }
+
+        return Inline
+            ? new(available.X, context.Px(InlineHeight))
+            : new(context.Px(26f + ContentWidth + 6f + 30f + 10f), available.Y);
+    }
+
+    // The large look, in design units: an arrow's box, a cell's width where the page gives none, and the room a row's
+    // arrows and value take together.
+    private const float LargeArrow = 44f;
+    private const float LargeCellWidth = 232f;
+    private const float LargeRowControl = 248f;
+
+    private bool Small => Theme.BodyTextSize < 18f;
+
+    // A row's height, and how far in from its edges its label and arrows stand. Layout pixels.
+    private const float InlineHeight = 57f;
+    private const float InlinePad = 20f;
+
+    /// <inheritdoc/>
+    protected override void ArrangeContent(LayoutContext context, UiRect contentRect)
+    {
+        if (Theme.Large)
+        {
+            float arrowBox = context.Px(LargeArrow);
+            if (Inline)
+            {
+                // A row: the arrows either side of the value, against the row's right inset.
+                float control = MathF.Min(context.Px(Small ? 196f : LargeRowControl), contentRect.Width * 0.55f);
+                float edge = contentRect.Right - context.Px(Theme.RowInset) + context.Px(8f);
+                float y = contentRect.Center.Y - (arrowBox * 0.5f);
+                _down = new UiRect(edge - control, y, arrowBox, arrowBox);
+                _up = new UiRect(edge - arrowBox, y, arrowBox, arrowBox);
+                return;
+            }
+
+            // A cell: its caption across the top, the arrows at its sides under that.
+            float top = contentRect.Y + context.Px(CellCaptionBand);
+            float cy = top + ((contentRect.Bottom - top - arrowBox) * 0.5f);
+            _down = new UiRect(contentRect.X + context.Px(6f), cy, arrowBox, arrowBox);
+            _up = new UiRect(contentRect.Right - context.Px(6f) - arrowBox, cy, arrowBox, arrowBox);
+            return;
+        }
+
+        if (Inline)
+        {
+            float box = context.Px(30f);
+            float right = contentRect.Right - context.Px(InlinePad) + context.Px(8f);
+            float left = right - box - context.Px(ContentWidth) - box;
+            float top = contentRect.Center.Y - (box * 0.5f);
+            _down = new UiRect(left, top, box, box);
+            _up = new UiRect(right - box, top, box, box);
+            return;
+        }
+
+        float arrow = context.Px(30f);
+        float x = contentRect.Right - context.Px(10f) - arrow;
+        float mid = contentRect.Center.Y;
+        _up = new UiRect(x, mid - arrow - context.Px(1f), arrow, arrow);
+        _down = new UiRect(x, mid + context.Px(1f), arrow, arrow);
+    }
+
+    /// <inheritdoc/>
+    protected override void OnDraw(UiPainter painter)
+    {
+        if (Theme.Large)
+        {
+            DrawLarge(painter);
+            return;
+        }
+
+        if (Inline)
+        {
+            DrawInline(painter);
+            return;
+        }
+
+        LayoutContext context = painter.Context;
+        float appear = Visual.Appear;
+        float hot = MathF.Max(Visual.Focus, IsPointerOver ? 1f : 0f);
+
+        if (hot > 0.001f)
+        {
+            painter.FillRect(Bounds, UiPalette.White(0.03f * hot * appear));
+        }
+
+        painter.FillRect(new UiRect(Bounds.Right - context.Px(1f), Bounds.Y, context.Px(1f), Bounds.Height), UiPalette.White(0.06f * appear));
+
+        float labelSize = context.Px(10f);
+        float valueSize = context.Px(26f);
+        float gap = context.Px(9f);
+        float block = Theme.Mono.LineHeight(labelSize) + gap + valueSize + gap + context.Px(2f);
+        float x = Bounds.X + context.Px(26f);
+        float y = Bounds.Center.Y - (block * 0.5f);
+
+        // Focus from a pad needs more than the faint wash the mock-up's hover has, so the caption warms too.
+        Bgra32 label = Interpolate.Lerp(Theme.TextMuted, Theme.Accent, Visual.Focus);
+        painter.DrawLabel(Theme.Mono, Label, new UiVec2(x, y), labelSize, UiPalette.Fade(label, appear), 0.3f);
+        y += Theme.Mono.LineHeight(labelSize) + gap;
+
+        if (_options.Count > 0)
+        {
+            var valueBox = new UiRect(x, y, context.Px(ContentWidth), valueSize);
+            painter.DrawLabel(Theme.Heading, _shown[_selected], new UiVec2(x, UiRowStyle.CapsCenterY(Theme.Heading, valueSize, valueBox)), valueSize, UiPalette.Fade(Theme.TextBright, appear), 0.08f);
+        }
+
+        y += valueSize + gap;
+        float px = x;
+        for (int i = 0; i < _pips.Count; i++)
+        {
+            float t = _pips[i].Value;
+            float w = context.Px(8f + (14f * t));
+            painter.FillRect(new UiRect(px, y, w, context.Px(2f)), UiPalette.Fade(Interpolate.Lerp(UiPalette.White(0.18f), Theme.Accent, t), appear));
+            px += w + context.Px(4f);
+        }
+
+        DrawArrow(painter, _up, UiDirection.Up, appear);
+        DrawArrow(painter, _down, UiDirection.Down, appear);
+    }
+
+    // The band a cell's caption has across its top, in design units.
+    private const float CellCaptionBand = 30f;
+
+    // The large look, row or cell: the value between two arrows a thumb can take, a pip under it for each choice.
+    private void DrawLarge(UiPainter painter)
+    {
+        LayoutContext context = painter.Context;
+        float appear = Visual.Appear;
+        float hot = UiRowStyle.Highlight(this);
+        if (Inline)
+        {
+            UiRowStyle.DrawFrame(painter, this, Caption, hot, _down.X);
+        }
+        else
+        {
+            painter.FillRect(Bounds, Bgra32.FromRgba(12, 14, 15, (byte)(199f * appear)));
+            if (hot > 0.001f)
+            {
+                painter.FillRect(Bounds, UiPalette.White(0.06f * hot * appear));
+            }
+
+            painter.StrokeRect(Bounds, context.Px(1f), UiPalette.White(0.12f * appear));
+            if (Visual.Focus > 0.001f)
+            {
+                painter.StrokeRect(Bounds, context.Px(2f), UiPalette.Fade(Theme.AccentHover, Visual.Focus * appear));
+            }
+
+            float captionSize = context.Px(Small ? 13f : 14f);
+            float captionWidth = UiPainter.MeasureLabel(Theme.Heading, Label, captionSize, 0.14f);
+            var band = new UiRect(Bounds.X, Bounds.Y + context.Px(10f), Bounds.Width, captionSize * 1.2f);
+            painter.DrawLabel(Theme.Heading, Label, new UiVec2(Bounds.Center.X - (captionWidth * 0.5f), UiRowStyle.CapsCenterY(Theme.Heading, captionSize, band)), captionSize, UiPalette.Fade(Theme.TextSecondary, appear), 0.14f);
+        }
+
+        float centre = (_down.Right + _up.X) * 0.5f;
+        float room = _up.X - _down.Right;
+        float valueSize = context.Px(Small ? 16f : 18f);
+        float caps = valueSize * 0.72f;
+        bool pips = _pips.Count is > 1 and <= 8;
+        float pipHeight = context.Px(3f);
+        float block = caps + (pips ? context.Px(6f) + pipHeight : 0f);
+        float top = _down.Center.Y - (block * 0.5f);
+        if (_options.Count > 0)
+        {
+            string value = OpenIGI.UI.Text.TextFit.ToWidth(Theme.Heading, _shown[_selected], valueSize, room);
+            float width = UiPainter.MeasureLabel(Theme.Heading, value, valueSize, 0.1f);
+            var valueBox = new UiRect(centre - (width * 0.5f), top, width, caps);
+            painter.DrawLabel(Theme.Heading, value, new UiVec2(valueBox.X, UiRowStyle.CapsCenterY(Theme.Heading, valueSize, valueBox)), valueSize, UiPalette.Fade(IsEnabled ? Theme.Text : Theme.TextDisabled, appear), 0.1f);
+        }
+
+        if (pips)
+        {
+            float pip = context.Px(10f);
+            float gap = context.Px(3f);
+            float x = centre - (((_pips.Count * pip) + ((_pips.Count - 1) * gap)) * 0.5f);
+            for (int i = 0; i < _pips.Count; i++)
+            {
+                Bgra32 ink = Interpolate.Lerp(UiPalette.White(0.22f), IsEnabled ? Theme.Accent : Theme.TextDisabled, _pips[i].Value);
+                painter.FillRect(new UiRect(x + (i * (pip + gap)), top + caps + context.Px(6f), pip, pipHeight), UiPalette.Fade(ink, appear));
+            }
+        }
+
+        DrawLargeArrow(painter, _down, -1f, appear);
+        DrawLargeArrow(painter, _up, 1f, appear);
+    }
+
+    private void DrawLargeArrow(UiPainter painter, UiRect box, float sign, float appear)
+    {
+        bool hot = IsEnabled && IsPointerOver && box.Contains(_pointer);
+        float reach = painter.Context.Px(6f);
+        float thick = painter.Context.Px(2f);
+        UiVec2 c = box.Center;
+        Bgra32 ink = UiPalette.Fade(!IsEnabled ? Theme.TextDisabled : hot ? Theme.Accent : Theme.TextSecondary, appear);
+        var tip = new UiVec2(c.X + (sign * reach * 0.5f), c.Y);
+        painter.StrokeLine(new UiVec2(tip.X - (sign * reach), c.Y - reach), tip, thick, ink);
+        painter.StrokeLine(new UiVec2(tip.X - (sign * reach), c.Y + reach), tip, thick, ink);
+    }
+
+    // The row: its label on the left, its value centred between the arrows with the pips under it, a hairline beneath.
+    private void DrawInline(UiPainter painter)
+    {
+        LayoutContext context = painter.Context;
+        float appear = Visual.Appear;
+        float hot = MathF.Max(Visual.Focus, IsPointerOver ? 1f : 0f);
+        if (hot > 0.001f)
+        {
+            painter.FillRect(Bounds, UiPalette.White(0.03f * hot * appear));
+        }
+
+        float labelSize = context.Px(17f);
+        Bgra32 label = Interpolate.Lerp(UiPalette.TextBody, Theme.Accent, Visual.Focus);
+        painter.DrawText(
+            Theme.Body,
+            Caption,
+            new UiVec2(Bounds.X + context.Px(InlinePad), UiRowStyle.CenterY(Theme.Body, labelSize, Bounds)),
+            labelSize,
+            UiPalette.Fade(label, appear));
+
+        float valueSize = context.Px(20f);
+        float centre = (_down.Right + _up.X) * 0.5f;
+        float valueY = Bounds.Center.Y - (valueSize * 0.6f);
+        if (_options.Count > 0)
+        {
+            float width = UiPainter.MeasureLabel(Theme.Heading, _shown[_selected], valueSize, 0.08f);
+            var valueBox = new UiRect(centre - (width * 0.5f), valueY, width, valueSize);
+            painter.DrawLabel(Theme.Heading, _shown[_selected], new UiVec2(valueBox.X, UiRowStyle.CapsCenterY(Theme.Heading, valueSize, valueBox)), valueSize, UiPalette.Fade(Theme.TextBright, appear), 0.08f);
+        }
+
+        float pipsWidth = 0f;
+        for (int i = 0; i < _pips.Count; i++)
+        {
+            pipsWidth += context.Px(8f + (14f * _pips[i].Value)) + (i > 0 ? context.Px(4f) : 0f);
+        }
+
+        float px = centre - (pipsWidth * 0.5f);
+        float py = valueY + valueSize + context.Px(5f);
+        for (int i = 0; i < _pips.Count; i++)
+        {
+            float t = _pips[i].Value;
+            float w = context.Px(8f + (14f * t));
+            painter.FillRect(new UiRect(px, py, w, context.Px(2f)), UiPalette.Fade(Interpolate.Lerp(UiPalette.White(0.18f), Theme.Accent, t), appear));
+            px += w + context.Px(4f);
+        }
+
+        DrawArrow(painter, _down, UiDirection.Left, appear);
+        DrawArrow(painter, _up, UiDirection.Right, appear);
+    }
+
+    private void DrawArrow(UiPainter painter, UiRect box, UiDirection direction, float appear)
+    {
+        bool hot = IsPointerOver && box.Contains(_pointer);
+        if (Inline)
+        {
+            // A row's arrows are thin chevrons, grey until the pointer is on one.
+            float reach = painter.Context.Px(4f);
+            float thick = painter.Context.Px(1.5f);
+            float sign = direction == UiDirection.Left ? -1f : 1f;
+            UiVec2 c = box.Center;
+            Bgra32 ink = UiPalette.Fade(hot ? Theme.Accent : Theme.TextSecondary, appear);
+            var tip = new UiVec2(c.X + (sign * reach * 0.5f), c.Y);
+            painter.StrokeLine(new UiVec2(tip.X - (sign * reach), c.Y - reach), tip, thick, ink);
+            painter.StrokeLine(new UiVec2(tip.X - (sign * reach), c.Y + reach), tip, thick, ink);
+            return;
+        }
+
+        Bgra32 color = hot ? Theme.Accent : Theme.TextDim;
+        float size = painter.Context.Px(9f);
+        Span<UiVec2> triangle = stackalloc UiVec2[3];
+        float angle = direction switch
+        {
+            UiDirection.Up => -MathF.PI / 2f,
+            UiDirection.Down => MathF.PI / 2f,
+            UiDirection.Left => MathF.PI,
+            _ => 0f,
+        };
+        UiPath.Chevron(box.Center, size, angle, triangle);
+        painter.FillPolygon(triangle, UiPalette.Fade(color, appear));
+    }
+}

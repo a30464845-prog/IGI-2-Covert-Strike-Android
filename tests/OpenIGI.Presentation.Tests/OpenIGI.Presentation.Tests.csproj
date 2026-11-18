@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <!-- The title-agnostic rendering: the weather and particle passes, the view-model projection, the
+         free camera. None of it touches a graphics device, which is the whole reason it can be tested. -->
+    <ProjectReference Include="..\..\src\Game\OpenIGI.Game.Igi1\OpenIGI.Game.Igi1.csproj" />
+    <ProjectReference Include="..\..\src\Game\OpenIGI.Presentation.Igi1\OpenIGI.Presentation.Igi1.csproj" />
+    <ProjectReference Include="..\..\src\Game\OpenIGI.Presentation\OpenIGI.Presentation.csproj" />
+    <ProjectReference Include="..\OpenIGI.TestSupport\OpenIGI.TestSupport.csproj" />
+
+    <!-- The Skia drawer, so the HUD's own parts can be drawn to a picture off the screen to look at. -->
+    <ProjectReference Include="..\..\src\UI\OpenIGI.UI.Skia\OpenIGI.UI.Skia.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The storm's drop sheet, so the tests that read its layout read the shipped images rather than a
+         copy of them that is free to drift. -->
+    <None Include="..\..\apps\OpenIGI.Composition\Assets\weather\*.png"
+          Link="Assets\weather\%(Filename)%(Extension)"
+          CopyToOutputDirectory="PreserveNewest" />
+
+    <!-- The interface's faces, which the remastered display draws its text in. -->
+    <None Include="..\..\apps\OpenIGI.Composition\Assets\fonts\Barlow-Regular.ttf;..\..\apps\OpenIGI.Composition\Assets\fonts\Barlow-Medium.ttf;..\..\apps\OpenIGI.Composition\Assets\fonts\BarlowCondensed-SemiBold.ttf;..\..\apps\OpenIGI.Composition\Assets\fonts\BarlowCondensed-Bold.ttf;..\..\apps\OpenIGI.Composition\Assets\fonts\JetBrainsMono-Regular.ttf"
+          Link="Assets\fonts\%(Filename)%(Extension)"
+          CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="coverlet.collector" />
+  </ItemGroup>
+
+</Project>

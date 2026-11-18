@@ -1,0 +1,562 @@
+using OpenIGI.Core.Diagnostics;
+using OpenIGI.Core.Numerics;
+using OpenIGI.Engine.Tasks;
+using OpenIGI.Game.Ai;
+using OpenIGI.Game.Igi1.Player;
+using OpenIGI.Game.Player;
+using OpenIGI.Game.World;
+
+namespace OpenIGI.Game.Igi1.Ai;
+
+/// <summary>
+/// What the parts of <see cref="SoldierSimulation"/> share: the roster and its brains, their health and combat rows, the
+/// level's one random stream and tick count, the world the bodies are cast against and the ground they stand on.
+/// </summary>
+/// <remarks>
+/// The simulation owns it and coordinates; every part it hands this to reads and writes the same tables rather than a
+/// copy, so a brain made by one part is the brain every other part ticks, hits and hears.
+/// </remarks>
+/// <param name="logger">Where the soldiers report.</param>
+internal sealed class SoldierContext(IOpenIgiLogger logger)
+{
+    /// <summary>The category every soldier line is logged under, and the prefix of the narrower ones.</summary>
+    public const string LogCategory = "Soldier";
+
+    /// <summary>How far above the declared position the ground probe starts — 0.5 m.</summary>
+    public const double ProbeAboveInUnits = 2048.0;
+
+    /// <summary>How far below the declared position the probe reaches — 2 m, the sliding step-down budget.</summary>
+    // The terrain query itself only reaches this far down (TerrainHeightQuery.SearchDepthUnits), so
+    // widening the acceptance window to the same depth settles every surface the query can find.
+    // Level 4 authors several soldiers 2.3-3.1m above the terrain (larger than the old 2m window),
+    // which otherwise float; a placed surface the ray cast finds (a roof, a vehicle) is higher than the
+    // terrain and wins, so a soldier standing on one is not pulled down. A character far above the
+    // terrain (a rooftop watcher) has no surface within the search depth and is left alone.
+    public const double ProbeBelowInUnits = 16385.0;
+
+    /// <summary>This frame's ground-snap results by queried position; see <see cref="SnapToGround"/>.</summary>
+    private readonly Dictionary<Vector3d, double> _groundSnaps = [];
+
+    /// <summary>Gets where the soldiers report.</summary>
+    public IOpenIgiLogger Logger { get; } = logger;
+
+    /// <summary>Gets the soldiers as the simulation walks them: each drawn group's roster, in the groups' order.</summary>
+    public List<SoldierModelGroup> Roster { get; } = [];
+
+    // Every body that has been given state of its own -- a health, a settings row, a bound, a place out of the world --
+    // so a new level can take it all back. The state itself is the body's (SoldierView).
+    private readonly List<SoldierView> _bodies = [];
+
+    /// <summary>Notes a body that now carries state, to be cleared with the level.</summary>
+    /// <param name="view">The body.</param>
+    public void Keep(SoldierView view)
+    {
+        if (!_bodies.Contains(view))
+        {
+            _bodies.Add(view);
+        }
+    }
+
+    /// <summary>Gets every body that carries state of its own, to be walked without allocating.</summary>
+    public IReadOnlyList<SoldierView> Bodies => _bodies;
+
+    /// <summary>Gets the damage state of every body that has been hit: for tests and reports, not the tick.</summary>
+    public IEnumerable<HumanHealth> Healths
+    {
+        get
+        {
+            foreach (SoldierView body in _bodies)
+            {
+                if (body.Health is { } health)
+                {
+                    yield return health;
+                }
+            }
+        }
+    }
+
+    /// <summary>Takes back what every body carries of a level: its health, its settings row, its bound and its place out of the world.</summary>
+    public void ForgetBodyState()
+    {
+        foreach (SoldierView body in _bodies)
+        {
+            body.Health = null;
+            body.Combat = null;
+            body.DetectorMarkerScaleMetres = 0f;
+            body.GoneBody = null;
+        }
+
+        _bodies.Clear();
+    }
+
+    /// <summary>Takes back every body's damage state.</summary>
+    public void ForgetHealth()
+    {
+        foreach (SoldierView body in _bodies)
+        {
+            body.Health = null;
+        }
+    }
+
+    /// <summary>Takes back every body's settings row.</summary>
+    public void ForgetCombat()
+    {
+        foreach (SoldierView body in _bodies)
+        {
+            body.Combat = null;
+        }
+    }
+
+    /// <summary>Takes back every body's authored bound.</summary>
+    public void ForgetMarkerScales()
+    {
+        foreach (SoldierView body in _bodies)
+        {
+            body.DetectorMarkerScaleMetres = 0f;
+        }
+    }
+
+    /// <summary>Gets or sets the stream the soldiers draw from -- the level's one global stream.</summary>
+    public IgiRandom AiRandom { get; set; } = new();
+
+    /// <summary>Gets each soldier's brain.</summary>
+    // A dead soldier cannot stay in a shared group: the group is skinned from ONE representative's pose, so
+    // a corpse there would keep standing in the group's idle animation. Each gets its own single-member
+    // group instead, ticked and re-skinned from its own rig, which is what lets it fall.
+    public Dictionary<SoldierView, Igi1HumanAi> Brains { get; } = [];
+
+    /// <summary>
+    /// Gets or sets whether these soldiers are a co-op client's, every one the server's puppet: their health and deaths
+    /// are the server's word, so a round that meets one here bleeds and nothing more.
+    /// </summary>
+    public bool PuppetsOnly { get; set; }
+
+    /// <summary>Gets each brain by its runtime id.</summary>
+    public Dictionary<int, Igi1HumanAi> BrainsByRuntimeId { get; } = [];
+
+    // The highest runtime id any soldier of this level has had, gone bodies' too.
+    private int _highestRuntimeId;
+
+    /// <summary>Gets a runtime id no soldier of this level has had, for a generator's replacement.</summary>
+    /// <remarks>
+    /// Never one a body that left the world had: a co-op client keeps every corpse under its id, since it runs no mind to take
+    /// one out, and a replacement given a corpse's id would be posed on that corpse -- lying dead and firing.
+    /// </remarks>
+    /// <returns>The id.</returns>
+    public int NewRuntimeId() => checked(_highestRuntimeId + 1);
+
+    /// <summary>Registers a soldier's brain, under its view and its runtime id.</summary>
+    /// <param name="view">The soldier.</param>
+    /// <param name="brain">Its brain, its runtime id already given.</param>
+    public void Register(SoldierView view, Igi1HumanAi brain)
+    {
+        BrainsVersion++;
+        Brains[view] = brain;
+        BrainsByRuntimeId[brain.RuntimeId] = brain;
+        _highestRuntimeId = Math.Max(_highestRuntimeId, brain.RuntimeId);
+        foreach (Func<GuardControl, IGuardBehaviour?> factory in GuardBehaviours)
+        {
+            brain.Attach(factory, Logger);
+        }
+    }
+
+    /// <summary>Gets what attaches mods' behaviours to each guard, in the order they were attached (SoldierSimulation.AttachGuardBehaviour). <b>Not retail.</b></summary>
+    public List<Func<GuardControl, IGuardBehaviour?>> GuardBehaviours { get; } = [];
+
+    /// <summary>Forgets every brain, for the next level.</summary>
+    public void ClearBrains()
+    {
+        BrainsVersion++;
+        Brains.Clear();
+        BrainsByRuntimeId.Clear();
+        _highestRuntimeId = 0;
+    }
+
+    /// <summary>
+    /// Gets a count that moves whenever a soldier joins or leaves <see cref="Brains"/>: a soldier's task asks again for the
+    /// bodies it owns only then.
+    /// </summary>
+    public int BrainsVersion { get; private set; }
+
+    /// <summary>Takes a soldier out of the brains: a generator's dead guard, as its replacement is cloned.</summary>
+    /// <param name="view">The soldier.</param>
+    public void Forget(SoldierView view)
+    {
+        BrainsVersion++;
+        Brains.Remove(view);
+    }
+
+    /// <summary>Gets each soldier's view by its task, for the hit events the task receives.</summary>
+    public Dictionary<HumanTask, SoldierView> ViewsByTask { get; } = [];
+
+    /// <summary>Gets or sets the simulation's tick count.</summary>
+    public int TickCount { get; set; }
+
+    /// <summary>Gets or sets the player's team, resolved once per level from the declared HumanPlayer task.</summary>
+    public int PlayerTeam { get; set; }
+
+    /// <summary>Gets or sets the level's player task, which the player's rounds name as their shooter.</summary>
+    public HumanPlayerTask? PlayerTask { get; set; }
+
+    /// <summary>Gets or sets the combat-target record the brains fight the player through.</summary>
+    public AiCombatTarget PlayerTarget { get; set; } = new("HumanPlayer");
+
+    /// <summary>Gets or sets the level's terrain.</summary>
+    public IGroundHeightField? Terrain { get; set; }
+
+    /// <summary>Gets or sets the cast against placed collision a body stands on and a round meets.</summary>
+    public WorldRayCast? Cast { get; set; }
+
+    /// <summary>Gets or sets the cast a sight line is tested with.</summary>
+    public WorldRayCast? Sight { get; set; }
+
+    /// <summary>Gets or sets the world trace the detection ray (<c>0x489B20</c>) is cast through, which reports what it met.</summary>
+    public WorldTraceCast? SightTrace { get; set; }
+
+    /// <summary>Gets or sets the level's live StationaryGun tasks.</summary>
+    public WorldInteractionRegistry? Interactions { get; set; }
+
+    /// <summary>Gets or sets the placed-object collision index.</summary>
+    public ObjectCollisionIndex? Solids { get; set; }
+
+    /// <summary>Gets or sets the active authored cutscene transform source.</summary>
+    public CutsceneRuntime? Cutscenes { get; set; }
+
+    /// <summary>Forgets the ground heights the bodies were set down on, for a new level.</summary>
+    public void ForgetGroundSnaps() => _groundSnaps.Clear();
+
+    /// <summary>Puts a soldier's feet on whatever is under its declared position.</summary>
+    /// <remarks>
+    /// <para>
+    /// In the original the level's declared <c>Position</c> is only where a soldier <em>starts</em>: its
+    /// update runs the same movement integrator as the player's, whose ground pass (<c>0x462390</c>)
+    /// snaps the body onto the surface below within the first ticks. The port does not tick soldiers
+    /// yet, so a body drawn with its skeleton root at the declared height stands buried to the waist
+    /// wherever the position was authored at floor level.
+    /// </para>
+    /// <para>
+    /// This reproduces the settled state, not the mechanism: probe down from half a metre above the
+    /// declared position — placed objects first, terrain as the fallback, highest surface wins — and
+    /// stand the <b>skin's lowest vertex</b> on it. The original's own foot reference is
+    /// <c>0x48A340</c>'s bone-0-plus-<c>Human+1300</c> offset, and the <c>+1300</c> term is still
+    /// unread, so the mesh's own extent is the honest stand-in. A recorded
+    /// divergence, retired with the soldier update.
+    /// </para>
+    /// </remarks>
+    public static Vector3d Stand(HumanSoldierTask soldier, SoldierModelGroup group, IGroundHeightField? terrain, WorldRayCast? cast)
+    {
+        Vector3d declared = soldier.Position;
+        double probeTop = declared.Z + ProbeAboveInUnits;
+        double groundZ = double.MinValue;
+        bool foundGround = false;
+
+        if (cast is not null
+            && cast(
+                new Vector3d(declared.X, declared.Y, probeTop),
+                new Vector3d(declared.X, declared.Y, declared.Z - ProbeBelowInUnits),
+                out WorldRayHit hit))
+        {
+            groundZ = hit.Position.Z;
+            foundGround = true;
+        }
+
+        if (terrain is not null
+            && terrain.TryGetGround(declared.X, declared.Y, probeTop, out TerrainGround ground)
+            && ground.Height >= declared.Z - ProbeBelowInUnits
+            && ground.Height <= probeTop)
+        {
+            groundZ = foundGround ? Math.Max(groundZ, ground.Height) : ground.Height;
+            foundGround = true;
+        }
+
+        if (!foundGround)
+        {
+            groundZ = declared.Z;
+        }
+
+        return new Vector3d(
+            declared.X / WorldScene.UnitsPerMetre,
+            declared.Y / WorldScene.UnitsPerMetre,
+            (groundZ / WorldScene.UnitsPerMetre) - group.Body.LowestVertexZ);
+    }
+
+    /// <summary>The collision surface under a point, in world units — placed objects first, terrain second.</summary>
+    /// <param name="x">The point's X, in world units.</param>
+    /// <param name="y">Its Y.</param>
+    /// <param name="declaredZ">The feet the query starts from; returned unchanged when nothing is under them.</param>
+    /// <returns>The highest floor within the probe, or <paramref name="declaredZ"/> if none.</returns>
+    /// <remarks>
+    /// The same query <see cref="Stand"/> runs, without the mesh lift — for grounding a live soldier's feet
+    /// each frame. It chooses the highest support in the probe and can therefore lower a soldier whose
+    /// authored spawn is slightly above the terrain, as well as lift one authored just below its floor.
+    /// </remarks>
+    public double SnapToGround(double x, double y, double declaredZ)
+    {
+        // One collision cast and one terrain descent per distinct position per FRAME: the shadow
+        // cascades and the geometry pass each resolve every soldier's feet from the same positions,
+        // and this query was being paid once per pass. Cleared in BeginFrame, so a moved soldier is
+        // re-queried the moment the simulation actually moved it.
+        Vector3d key = new(x, y, declaredZ);
+        if (_groundSnaps.TryGetValue(key, out double cached))
+        {
+            return cached;
+        }
+
+        double groundZ = double.MinValue;
+        bool foundGround = false;
+        double probeTop = declaredZ + ProbeAboveInUnits;
+
+        if (Cast is not null
+            && Cast(new Vector3d(x, y, probeTop), new Vector3d(x, y, declaredZ - ProbeBelowInUnits), out WorldRayHit hit))
+        {
+            groundZ = hit.Position.Z;
+            foundGround = true;
+        }
+
+        if (Terrain is not null
+            && Terrain.TryGetGround(x, y, probeTop, out TerrainGround ground)
+            && ground.Height >= declaredZ - ProbeBelowInUnits
+            && ground.Height <= probeTop)
+        {
+            groundZ = foundGround ? Math.Max(groundZ, ground.Height) : ground.Height;
+            foundGround = true;
+        }
+
+        // Cached whether or not anything was found, because "nothing is under these feet" costs the
+        // same two queries to establish as a floor does and is just as true for the rest of the frame.
+        double snapped = foundGround ? groundZ : declaredZ;
+        _groundSnaps[key] = snapped;
+        return snapped;
+    }
+
+    /// <summary>The ground query a brain or a corpse stands on: placed collision and terrain, highest wins.</summary>
+    /// <returns>The query, or <see langword="null"/> when the level has neither.</returns>
+    public Igi1HumanAi.GroundQuery? MakeGroundQuery()
+    {
+        IGroundHeightField? terrain = Terrain;
+        WorldRayCast? cast = Cast;
+        if (terrain is null && cast is null)
+        {
+            return null;
+        }
+
+        return (x, y, z, out groundZ) =>
+        {
+            groundZ = double.MinValue;
+            bool found = false;
+
+            if (cast is not null
+                && cast(
+                    new Vector3d(x, y, z),
+                    new Vector3d(x, y, z - ProbeBelowInUnits - ProbeAboveInUnits),
+                    out WorldRayHit hit))
+            {
+                groundZ = hit.Position.Z;
+                found = true;
+            }
+
+            if (terrain is not null
+                && terrain.TryGetGround(x, y, z, out TerrainGround ground)
+                && ground.Height >= z - ProbeBelowInUnits - ProbeAboveInUnits
+                && ground.Height <= z)
+            {
+                if (ground.Height > groundZ)
+                {
+                    groundZ = ground.Height;
+                }
+
+                found = true;
+            }
+
+            return found;
+        };
+    }
+
+    /// <summary>The roster group a soldier is drawn in.</summary>
+    /// <param name="view">The soldier.</param>
+    /// <returns>The group, or <see langword="null"/> when the soldier is in none.</returns>
+    public SoldierModelGroup? FindRoster(SoldierView view)
+    {
+        foreach (SoldierModelGroup group in Roster)
+        {
+            foreach (SoldierAgent agent in group.Agents)
+            {
+                if (ReferenceEquals(agent.View, view))
+                {
+                    return group;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>The roster entry a soldier is drawn as: its weapon, its clip and its palette.</summary>
+    /// <param name="view">The soldier.</param>
+    /// <returns>The agent, or <see langword="null"/> when the soldier is in no group.</returns>
+    public SoldierAgent? FindAgent(SoldierView view)
+    {
+        // Indexed: asked for every soldier every tick, and the agents' interface enumerator was boxed each time.
+        foreach (SoldierModelGroup group in Roster)
+        {
+            IReadOnlyList<SoldierAgent> agents = group.Agents;
+            for (int i = 0; i < agents.Count; i++)
+            {
+                if (ReferenceEquals(agents[i].View, view))
+                {
+                    return agents[i];
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>Gets or sets what is told when a dead body leaves the world, for whoever draws it.</summary>
+    public Action<SoldierAgent>? BodyRemoved { get; set; }
+
+    /// <summary>Takes a dead body out of the world, as <c>Human_DeactivateHandler</c> (<c>0x4609A0</c>) does.</summary>
+    /// <param name="view">The soldier whose body leaves.</param>
+    /// <remarks>
+    /// Every draw, shadow, hit test and sweep walks the roster, so leaving it is leaving the world: retail clears the
+    /// Human's in-world byte (+3318) and takes its bone object out of the world's cubes.
+    /// </remarks>
+    public void RemoveBody(SoldierView view)
+    {
+        if (FindAgent(view) is not { } agent || FindRoster(view) is not { } group)
+        {
+            return;
+        }
+
+        group.Remove(agent);
+        if (Brains.TryGetValue(view, out Igi1HumanAi? brain))
+        {
+            BrainsByRuntimeId.Remove(brain.RuntimeId);
+        }
+
+        view.Soldier.IsOutOfWorld = true;
+        view.GoneBody = (agent, group);
+        Keep(view);
+        BodyRemoved?.Invoke(agent);
+    }
+
+    /// <summary>The <c>HumanAI</c> child a soldier's body carries, if the level gave it one.</summary>
+    /// <param name="view">The soldier.</param>
+    /// <returns>The task, or <see langword="null"/>.</returns>
+    public static HumanAiTask? FindMind(SoldierView view)
+    {
+        foreach (GameTask child in view.Soldier.Children)
+        {
+            if (child is HumanAiTask mind)
+            {
+                return mind;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>The point an area counts a soldier at: its origin, <c>Human+32</c>, not its feet.</summary>
+    /// <remarks>
+    /// <para>
+    /// The human criteria callbacks an <c>AreaActivate</c> runs (<c>0x460A10</c> for <c>CRITERIA_HUMAN%d</c>,
+    /// <c>0x460A70</c> for <c>CRITERIA_HUMAN</c>) hand the box test <c>0x5042B0</c> each registered human's
+    /// <c>+32</c>. For a soldier that is the ground its AI stood it on plus the clip's root height (<c>0x462390</c>
+    /// adds <c>Human+1300</c>, <see cref="SoldierView.RootSample"/>): about 0.95 m above the feet standing.
+    /// </para>
+    /// <para>
+    /// Counting the feet dropped mission 4's running squad out of "Team one stop 1" (<c>AreaActivate_150</c>),
+    /// whose floor is 0.25 m above the ground they cross. Retail's squad fills it at tick 3818 and opens the
+    /// med-warehouse guards (<c>ConditionalContainer_302</c>) on them; the port's never did, so the squad reached
+    /// its stops unopposed where retail's is fighting by tick 4548.
+    /// </para>
+    /// </remarks>
+    public static Vector3d OccupantOrigin(SoldierView view) =>
+        new(view.Position.X, view.Position.Y, view.Position.Z + view.RootSample.Z);
+
+    /// <summary>Where a soldier's view stands, which its gun fires from (<c>0x462E50</c> reads the view's <c>+224</c>).</summary>
+    /// <remarks>
+    /// 0x464BD0 places the view at 0x465820's point -- the origin (<c>Human+32</c>) raised 0.7 m, or 0.35 m with the
+    /// crouch byte set, as it is in the firing state -- plus offsets a soldier's view leaves at zero.
+    /// </remarks>
+    public static Vector3d ViewPosition(SoldierView view, Igi1HumanAi brain)
+    {
+        // The brain has already moved this tick; the view is placed after the fire.
+        Vector3d feet = brain.Position;
+        double origin = feet.Z + view.RootSample.Z;
+        Vector3d placed = new(feet.X, feet.Y, origin + (brain.Body.CrouchByte ? 1433.6 : 2867.24));
+        return brain.Behaviours is { HasSenses: true } behaviours ? placed + behaviours.EyeOffset : placed;
+    }
+
+    /// <summary>
+    /// Whether a stationary gun the detection ray meets stands aside for it (<c>0x4752B0</c>): it does when the one looking,
+    /// or the one looked at, is on it -- so a gunner sees past his own gun and is seen behind it. To any other pair of
+    /// humans it is as solid as a wall.
+    /// </summary>
+    /// <param name="owner">The task whose collision the ray met.</param>
+    /// <param name="looker">The human looking: a soldier's id, or <see cref="AiDetectionCandidate.PlayerId"/>.</param>
+    /// <param name="seen">The human looked at, the same way.</param>
+    public bool GunStandsAside(GameTask owner, int looker, int seen) =>
+        Interactions?.FindStationaryGun(owner.Id) is { Occupant: { } user }
+        && (IsOn(user, owner.Id, looker) || IsOn(user, owner.Id, seen));
+
+    // Whether a human is the one on a gun: the player through its use of the gun, a soldier through its brain.
+    private bool IsOn(object user, int gunTaskId, int human) => human == AiDetectionCandidate.PlayerId
+        ? Interactions?.IsPlayerOnStationaryGun(gunTaskId) == true
+        : Brains.Any(pair => pair.Key.Soldier.Id == human && ReferenceEquals(pair.Value, user));
+
+    /// <summary>Gets a soldier's damage state, creating it on the first hit.</summary>
+    public HumanHealth HealthOf(SoldierView soldier)
+    {
+        if (soldier.Health is not { } health)
+        {
+            health = NewHealth(soldier);
+            soldier.Health = health;
+            Keep(soldier);
+        }
+
+        return health;
+    }
+
+    /// <summary>
+    /// A fresh damage state — <c>0x489C30</c> over the class's hit-zone table, with the settings row's
+    /// maximum health once <c>0x406F70</c> has configured the soldier -- times <see cref="HealthScale"/>.
+    /// </summary>
+    public HumanHealth NewHealth(SoldierView soldier)
+    {
+        HumanHealth health = new(
+            soldier.Soldier.Class.HitZones,
+            soldier.Combat is { } row ? row.MaximumHealth : HumanHitZoneTable.MaximumHealth);
+        health.RescaleMaximumHealth(health.BaseMaximumHealth * _healthScale);
+        return health;
+    }
+
+    private float _healthScale = 1f;
+
+    /// <summary>Gets or sets how many times its own health every soldier has: a co-op squad's toughness, one alone.</summary>
+    /// <remarks>
+    /// Every soldier's, made now or later -- a health is made on a soldier's first hit, and a generator's replacement has
+    /// one of its own -- while each living one keeps the share of its health it has already lost. The players' own health
+    /// is no soldier's, and never scaled.
+    /// </remarks>
+    public float HealthScale
+    {
+        get => _healthScale;
+        set
+        {
+            if (value <= 0f || value == _healthScale)
+            {
+                return;
+            }
+
+            _healthScale = value;
+            for (int i = 0; i < _bodies.Count; i++)
+            {
+                if (_bodies[i].Health is { IsDead: false } health)
+                {
+                    health.RescaleMaximumHealth(health.BaseMaximumHealth * value);
+                }
+            }
+        }
+    }
+}
