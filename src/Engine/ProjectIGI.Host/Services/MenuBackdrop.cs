@@ -133,6 +133,13 @@ internal sealed class MenuBackdrop(IGraphicsDevice device, IProjectIGILogger log
         _liteApplied = lite;
         if (lite)
         {
+            // The retail menu draws in the task walk, before the frame's 3D pass -- and the
+            // capture's resolve clears the back buffer and covers all of it, so a capture left
+            // open behind the menu wipes the menu every frame. A benchmark choice that leaves
+            // the render scale below native opens the capture exactly there, and the menu never
+            // comes back. Holding the capture off while the backdrop is lite keeps the menu on
+            // the direct path; Play clears the override with the rest of the profile.
+            FrameCVars.OffscreenScene.Override(false);
             LightingCVars.Lighting.Override(LightingModel.Baked);
             SurfaceCacheCVars.SurfaceCache.Override(false);
             RayTracingCVars.DistanceFields.Override(false);
@@ -147,6 +154,7 @@ internal sealed class MenuBackdrop(IGraphicsDevice device, IProjectIGILogger log
         }
         else
         {
+            FrameCVars.OffscreenScene.ClearOverride();
             LightingCVars.Lighting.ClearOverride();
             SurfaceCacheCVars.SurfaceCache.ClearOverride();
             RayTracingCVars.DistanceFields.ClearOverride();
