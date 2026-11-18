@@ -65,13 +65,18 @@ public sealed class RetailMenuHost : IRetailMenuPresenter
     }
 
     /// <inheritdoc/>
-    public bool IsKeyDown(int scanCode) => scanCode is > 0 and <= byte.MaxValue && _input.Keyboard.IsDown((KeyCode)scanCode);
+    public bool IsKeyDown(int scanCode) => !Suppressed && scanCode is > 0 and <= byte.MaxValue && _input.Keyboard.IsDown((KeyCode)scanCode);
 
     /// <inheritdoc/>
     public int MouseButtons
     {
         get
         {
+            if (Suppressed)
+            {
+                return 0;
+            }
+
             int buttons = 0;
             for (int i = 0; i < MouseState.ButtonCount; i++)
             {
@@ -89,6 +94,14 @@ public sealed class RetailMenuHost : IRetailMenuPresenter
     /// <inheritdoc/>
     public bool TryGetPointer(out int x, out int y, out bool buttonDown)
     {
+        if (Suppressed)
+        {
+            x = 0;
+            y = 0;
+            buttonDown = false;
+            return false;
+        }
+
         (int authoredX, int authoredY) = ToAuthored((int)_input.Mouse.X, (int)_input.Mouse.Y);
         x = authoredX;
         y = authoredY;
@@ -115,9 +128,11 @@ public sealed class RetailMenuHost : IRetailMenuPresenter
     {
         _events.Clear();
 
+        // Drained either way: a press queued while suppressed must not fire once it lifts.
+        // Suppressed, the presses are consumed and discarded.
         while (_input.Keyboard.TryDequeuePress(out KeyCode key))
         {
-            if (Map(key) is { } mapped)
+            if (!Suppressed && Map(key) is { } mapped)
             {
                 _events.Add(mapped);
             }
@@ -145,11 +160,22 @@ public sealed class RetailMenuHost : IRetailMenuPresenter
     };
 
     /// <inheritdoc/>
-    public void PrepareWindow(MenuWindowTask window) => _renderer?.Prepare(window);
+    public void PrepareWindow(MenuWindowTask window)
+    {
+        if (!Suppressed)
+        {
+            _renderer?.Prepare(window);
+        }
+    }
 
     /// <inheritdoc/>
     public void DrawScreen(MenuScreenTask screen)
     {
+        if (Suppressed)
+        {
+            return;
+        }
+
         _renderer?.Draw(_batch, screen, _screenWidth(), _screenHeight());
 
         // TEMPORARY DIAGNOSTIC (black-screen investigation): report what the menu's batch
@@ -169,8 +195,13 @@ public sealed class RetailMenuHost : IRetailMenuPresenter
     }
 
     /// <inheritdoc/>
-    public void DrawPopup(DialogWindowTask popup, int alpha) =>
-        _renderer?.DrawPopup(_batch, popup, alpha, _screenWidth(), _screenHeight());
+    public void DrawPopup(DialogWindowTask popup, int alpha)
+    {
+        if (!Suppressed)
+        {
+            _renderer?.DrawPopup(_batch, popup, alpha, _screenWidth(), _screenHeight());
+        }
+    }
 
     /// <inheritdoc/>
     /// <remarks>Drained from the window's own character queue, which is separate from the key queue.</remarks>
@@ -179,15 +210,23 @@ public sealed class RetailMenuHost : IRetailMenuPresenter
         _typed.Clear();
         while (_input.Keyboard.TryDequeueCharacter(out char typed))
         {
-            _typed.Add(typed);
+            if (!Suppressed)
+            {
+                _typed.Add(typed);
+            }
         }
 
         return _typed;
     }
 
     /// <inheritdoc/>
-    public void DrawPointer(int x, int y) =>
-        _renderer?.DrawPointer(_batch, x, y, _screenWidth(), _screenHeight());
+    public void DrawPointer(int x, int y)
+    {
+        if (!Suppressed)
+        {
+            _renderer?.DrawPointer(_batch, x, y, _screenWidth(), _screenHeight());
+        }
+    }
 
     /// <inheritdoc/>
     /// <remarks>
@@ -234,6 +273,9 @@ public sealed class RetailMenuHost : IRetailMenuPresenter
     /// <summary>Gets or sets the magnification the menu is drawn at; <see cref="UiScale.Automatic"/> derives one.</summary>
     /// <remarks>It must match the renderer's, because this is the hit-test's half of the same mapping.</remarks>
     public int Scale { get; }
+
+    /// <summary>Gets or sets whether the menus are suppressed: drawing nothing and reading no input, while a host overlay owns the frame.</summary>
+    public bool Suppressed { get; set; }
 
     /// <inheritdoc/>
     public void CloseScreens()

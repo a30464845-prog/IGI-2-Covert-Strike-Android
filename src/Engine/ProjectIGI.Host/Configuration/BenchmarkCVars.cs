@@ -2,12 +2,13 @@ using ProjectIGI.Core.Configuration;
 
 namespace ProjectIGI.Host.Configuration;
 
-/// <summary>Whether the first-run benchmark has been run or skipped.</summary>
+/// <summary>Whether the first-run benchmark has been run, and whether its prompt was dismissed for good.</summary>
 /// <remarks>
-/// Archived, so the answer survives to the next launch: the benchmark is a one-time test, and a
-/// first run that finished it -- or skipped it -- must never be asked again. An existing install
-/// has a settings file but no such line, so the flag alone never arms the run: arming also needs
-/// no settings file to have loaded at all (see <c>GameHost.Benchmark</c>).
+/// Archived, so the answers survive to the next launch. <c>r_benchmark_done</c> records that a run
+/// started; it never gates the prompt. The prompt itself is gated only by
+/// <c>r_benchmark_prompt_dismissed</c>: answering "Yes" runs the benchmark and leaves the prompt
+/// armed for a later launch, while "Yes (dont show it again)" runs it and sets the flag, so the
+/// prompt never appears again (see <c>GameHost.Benchmark</c>).
 /// </remarks>
 [CVarContainer]
 public static class BenchmarkCVars
@@ -18,6 +19,13 @@ public static class BenchmarkCVars
         false,
         CVarOptions.Archive,
         "Whether the first-run benchmark has finished or been skipped; set so it never runs unprompted again.");
+
+    /// <summary>Whether the first-run benchmark prompt was answered "Yes (dont show it again)".</summary>
+    public static readonly BoolCVar PromptDismissed = CVar.Bool(
+        "r_benchmark_prompt_dismissed",
+        false,
+        CVarOptions.Archive,
+        "Whether the first-run benchmark prompt was dismissed for good; set so it never asks again.");
 
     /// <summary>Summary of the last benchmark run that reached its results screen.</summary>
     /// <remarks>

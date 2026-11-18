@@ -26,13 +26,14 @@ public sealed partial class GameHost
     {
         // The showcase's first backdrop, asked for a couple of menu frames in so the shell is already on
         // screen. It is built on a worker like every other one; until it arrives the menu sits over its
-        // dark backdrop rather than over a blank blue clear. Not while the first-run benchmark is armed
-        // or running: the run asks for the Weather Station on the first menu frame, and this asking for
-        // the default showcase (mission 1) instead supersedes it in the preview loader -- the station
-        // finishes building, is dropped as no longer wanted, and the run waits 30 seconds for a level
-        // nobody is building before giving up. The run asks for the previous showcase again when it
-        // ends, and a run that never starts leaves both flags clear, so this fires on the next frame.
-        if (_menuFlow.OverShowcase && _menuFlow.ShowcasePending && !BenchmarkRunning && !_benchmarkPendingAuto
+        // dark backdrop rather than over a blank blue clear. Not while a benchmark run is going: the
+        // run asked for the Weather Station when its prompt was answered, and this asking for the
+        // default showcase (mission 1) instead would supersede it in the preview loader -- the
+        // station finishes building, is dropped as no longer wanted, and the run waits 30 seconds
+        // for a level nobody is building before giving up. The run asks for the previous showcase
+        // again when it ends over the shell. The prompt being up does not block this: the run's
+        // ask, when the prompt is answered, is always the newest request and supersedes safely.
+        if (_menuFlow.OverShowcase && _menuFlow.ShowcasePending && !BenchmarkRunning
             && _loop.Clock.FrameCount >= 2)
         {
             _menuFlow.ShowcasePending = false;
@@ -46,8 +47,10 @@ public sealed partial class GameHost
 
         // The backdrop is made playable here, on the frames where nothing is happening but a menu.
         // A couple of milliseconds is invisible at the uncapped rate the menu runs at, and the work
-        // is finished long before anybody has finished reading a briefing.
-        if (_menuFlow.OverShowcase && _arming is { IsArmed: false })
+        // is finished long before anybody has finished reading a briefing. A benchmark run over
+        // the retail menu needs the same arming: its Waiting phase watches IsArmed, and the
+        // retail menu never makes OverShowcase true.
+        if ((_menuFlow.OverShowcase || BenchmarkRunning) && _arming is { IsArmed: false })
         {
             _arming.Step(IdleArmingBudgetMilliseconds);
 
@@ -143,7 +146,7 @@ public sealed partial class GameHost
         }
 
         // A backdrop whose mission's files were still arriving, asked for again until they are there.
-        if (_menuFlow.OverShowcase && _backdropAwaitingFiles is { } awaitingFiles)
+        if ((_menuFlow.OverShowcase || BenchmarkRunning) && _backdropAwaitingFiles is { } awaitingFiles)
         {
             RequestBackdrop(state.PreviewLoader, awaitingFiles);
         }
@@ -155,7 +158,9 @@ public sealed partial class GameHost
         // Not once Play has been pressed: the mission goes in from the backdrop that was up when it was, and a backdrop
         // adopted under the going-in sequence would replace the renderer, the scene and the level's light with another
         // mission's, which the promoted one would then play under.
-        if (_menuFlow.OverShowcase && _menuFlow.HeldFrameReady && !EnteringMission)
+        // A benchmark run adopts the same way over the retail menu, where OverShowcase is never
+        // true: the run's own bypass marks the hold done (see GameHost.Benchmark).
+        if ((_menuFlow.OverShowcase || BenchmarkRunning) && _menuFlow.HeldFrameReady && !EnteringMission)
         {
             bool changed = false;
             if (state.PreviewLoader is { } loader

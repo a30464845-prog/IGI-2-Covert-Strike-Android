@@ -65,6 +65,21 @@ internal sealed class Igi1RetailMenus : IRetailMenus
     public void CloseScreens() => _shell.CloseScreens();
 
     /// <inheritdoc/>
+    public bool Suppressed
+    {
+        get => _shell.Suppressed;
+        set => _shell.Suppressed = value;
+    }
+
+    /// <inheritdoc/>
+    public void SyncGraphicsFromLive()
+    {
+        // Project I.G.I. keeps no retail graphics record to re-seed: no equivalent of the
+        // sequel's graphics applier exists for it, so the benchmark's decision reaches its
+        // settings through the live stores alone.
+    }
+
+    /// <inheritdoc/>
     public int ActiveMenuScreen => _menu.Manager.Navigator.CurrentScreen;
 
     /// <inheritdoc/>

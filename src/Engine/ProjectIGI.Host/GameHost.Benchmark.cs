@@ -44,12 +44,25 @@ public sealed partial class GameHost
     // BENCHMARK row, and the per-tier lines go to logcat as before.
     //
     // It cannot run in the file picker itself: no world is loaded there and no frame has been
-    // drawn, so there is nothing to measure yet. It runs on the first menu frames instead, right
-    // after the files are selected and the game boots -- the player is looking at the drone view
+    // drawn, so there is nothing to measure yet. The prompt asks on the first menu frames
+    // instead, right after the files are selected and the game boots, and the run follows the
+    // answer -- the player is looking at the drone view
     // while it measures, and lands on the results screen, then the menu, with the best tier
     // applied when it ends. After the results are dismissed the run returns to the main menu; it
     // does not start a mission on its own -- starting one is the player's press, not the
     // benchmark's.
+    //
+    // The first-run ask comes before the run: "Yes" runs it now and asks again on a later
+    // launch, "Yes (dont show it again)" runs it and never asks again. The prompt is a host
+    // overlay like the run's own HUD: it draws over whichever menu is up, and the menus stay
+    // deaf under it until it is answered.
+    //
+    // The run is not the cinematic shell's alone. On the retail path -- which Android always
+    // takes -- the shell's MenuMode never switches on, so every gate that used to read
+    // OverShowcase reads BenchmarkMenuUp instead: the shell's showcase, or the retail main
+    // menu standing open. The backdrop arming, the handover and the showcase camera all run
+    // for the benchmark on that path too. Without that the run never started: every gate
+    // silently refused it, which is what "it doesnt benchmark anything" was.
     //
     // The drone path: one continuous 360-degree orbit around the Weather Station's first showcase
     // point -- the player's spawn, which MissionShowcasePoints puts first -- at 0.25 radians per
@@ -128,8 +141,17 @@ public sealed partial class GameHost
     private const double BenchmarkOrbitSpeedRadiansPerSecond = 0.25;
 
     private BenchmarkPhase _benchmarkPhase = BenchmarkPhase.Idle;
-    private bool _benchmarkPendingAuto;
+
+    // The first-run prompt: armed at startup when the player has never dismissed it for good,
+    // shown on the first menu frame, answered once per launch. Either answer starts the run;
+    // only "dont show it again" sets the flag that keeps it from coming back.
+    private bool _benchmarkPromptArmed;
+    private bool _benchmarkPromptUp;
     private bool _benchmarkManual;
+
+    // Whether the run started over the cinematic shell's showcase, rather than the retail main
+    // menu: only the shell had a backdrop showing to ask for again when the run ends.
+    private bool _benchmarkOverShell;
     private int _benchmarkPhaseStartedMs;
     private int _benchmarkStartedMs;
     private int _benchmarkTierIndex;
@@ -161,21 +183,35 @@ public sealed partial class GameHost
 
     private bool BenchmarkRunning => _benchmarkPhase != BenchmarkPhase.Idle;
 
-    /// <summary>Arms the first-run benchmark, if this is a first run that has never had one.</summary>
-    /// <param name="settingsLoaded">Whether a settings file was loaded.</param>
+    /// <summary>Gets whether the benchmark may run or ask: at a main menu, over no mission, outside the pause menu and any load.</summary>
     /// <remarks>
-    /// The same gate PR #58's tiering uses: no settings file was loaded, so nothing the player
-    /// chose can be overwritten. An existing install has a settings file and never arms, even
-    /// though its file has no <c>r_benchmark_done</c> line. Capture and lockstep runs are
-    /// measuring something else already, and the -entrycam / -backdropcycle / -presetcycle
-    /// shortcuts would fight the run for the same scene, so none of them arms it either. This
-    /// only arms; the run itself starts on the first menu frame (see
-    /// <see cref="UpdateBenchmark"/>).
+    /// Either menu counts: the cinematic shell over its showcase, or the retail main menu
+    /// standing open on its main screen -- the path Android always takes, on which the shell's
+    /// <c>MenuMode</c> never switches on and <c>OverShowcase</c> is never true, so gating the
+    /// run on the shell alone left it unable to start at all. This deliberately does not reuse
+    /// <c>IsRetailMainMenuUp</c>: that one excludes a run in progress, which would make this
+    /// false the moment a run started.
     /// </remarks>
-    private void ArmFirstRunBenchmark(bool settingsLoaded)
+    private bool BenchmarkMenuUp =>
+        _session.Mission is null
+        && !_menuFlow.PauseMenu
+        && !_session.FailedMenu
+        && !_loadSequence.IsActive
+        && (_menuFlow.OverShowcase
+            || (_retailMenus is { } menus && menus.ActiveMenuScreen == Igi2MainMenuScreenId));
+
+    /// <summary>Arms the first-run benchmark prompt, if the player has never dismissed it for good.</summary>
+    /// <remarks>
+    /// The prompt -- not the run -- is what arms here: the run itself starts when the player
+    /// answers it (see <see cref="UpdateBenchmark"/>). The gate is the dismissal flag alone:
+    /// answering "Yes" runs the benchmark and leaves the prompt armed for a later launch, so a
+    /// settings file having loaded must not disarm it. Capture and lockstep runs are measuring
+    /// something else already, and the -entrycam / -backdropcycle / -presetcycle shortcuts
+    /// would fight the run for the same scene, so none of them arms it either.
+    /// </remarks>
+    private void ArmFirstRunBenchmark()
     {
-        if (settingsLoaded
-            || BenchmarkCVars.BenchmarkDone.Value
+        if (BenchmarkCVars.PromptDismissed.Value
             || _options.IsBenchmark
             || _options.Lockstep
             || _options.EntryCamMission > 0
@@ -185,10 +221,10 @@ public sealed partial class GameHost
             return;
         }
 
-        _benchmarkPendingAuto = true;
+        _benchmarkPromptArmed = true;
         _logger.Information(
             "Benchmark",
-            "First-run benchmark armed: no settings file was loaded and no run has finished or been skipped; it starts on the first menu frame.");
+            "First-run benchmark prompt armed: it asks on the first menu frame, unless the player dismissed it for good.");
     }
 
     /// <summary>Starts a benchmark run over the Weather Station, from the first run or the cheats menu.</summary>
@@ -207,7 +243,7 @@ public sealed partial class GameHost
             return;
         }
 
-        if (_session.Mission is not null || !_menuFlow.OverShowcase)
+        if (!BenchmarkMenuUp)
         {
             return;
         }
@@ -241,6 +277,12 @@ public sealed partial class GameHost
             ReconstructionCVars.FrameLimit.Value,
             FrameCVars.VSync.Value);
         _benchmarkManual = manual;
+        _benchmarkOverShell = _menuFlow.OverShowcase;
+
+        // A run starting -- from the prompt or the cheats menu -- answers the prompt for this
+        // launch: it must not come back over the run's own results, or after it ends.
+        _benchmarkPromptArmed = false;
+        _benchmarkPromptUp = false;
         _benchmarkResults.Clear();
         _benchmarkTierIndex = 0;
         _benchmarkSkipRequested = false;
@@ -292,20 +334,18 @@ public sealed partial class GameHost
     /// <param name="state">The frame loop's state, whose frame timings are measured.</param>
     private void UpdateBenchmark(FrameLoopState state)
     {
-        if (_benchmarkPendingAuto && !BenchmarkRunning)
+        if (_benchmarkPromptArmed && !BenchmarkRunning && !_benchmarkPromptUp)
         {
-            if (_session.Mission is not null)
+            // The prompt waits for a menu to ask over: a mission starting first (the command
+            // line's, say) just delays it until the menu comes back. Nothing is marked done:
+            // the prompt is not a run, and only answering it -- or dismissing it for good --
+            // settles this launch. A catalogue that does not offer the station never asks:
+            // the run it would start gives up before it begins.
+            if (BenchmarkMenuUp && _missions.TryGet(BenchmarkMissionId, out _))
             {
-                // Play was pressed before the run could start: that is a skip.
-                _benchmarkPendingAuto = false;
-                BenchmarkCVars.BenchmarkDone.Value = true;
-                state.Console.SaveSettings();
-                _logger.Information("Benchmark", "First-run benchmark skipped: a mission started before it could run.");
-            }
-            else if (_menuFlow.OverShowcase)
-            {
-                _benchmarkPendingAuto = false;
-                StartBenchmark(state, manual: false);
+                _benchmarkPromptArmed = false;
+                _benchmarkPromptUp = true;
+                _logger.Information("Benchmark", "First-run benchmark prompt shown.");
             }
 
             return;
@@ -327,10 +367,11 @@ public sealed partial class GameHost
             _showcaseCamera = _benchmarkCamera;
         }
 
-        // Leaving the showcase ends the run as a skip: the menu's Play button, a title switch,
-        // or the pause menu. The snapshot goes back, the flag stays set, and the player is
-        // wherever they were going.
-        if (_session.Mission is not null || !_menuFlow.MenuMode || _menuFlow.PauseMenu)
+        // Leaving the menu ends the run as a skip: the menu's Play button, a title switch, or
+        // the pause menu. The snapshot goes back, the flag stays set, and the player is
+        // wherever they were going. The retail menu counts as the menu here, as it does for
+        // starting: reading MenuMode alone aborted every retail-path run on its first frame.
+        if (!BenchmarkMenuUp)
         {
             AbortBenchmark(state, "ended: a mission started");
             return;
@@ -360,6 +401,21 @@ public sealed partial class GameHost
             }
 
             return;
+        }
+
+        // The retail path has no shell to drive the backdrop handover's hold: nothing sets
+        // HoldFrameWanted and nothing captures the held frame, so the handover would wait
+        // forever on a handshake nobody performs. While a run is going over the retail menu,
+        // a built backdrop is handed over directly -- there is no outgoing picture to
+        // dissolve from, so the hold is marked done with no picture and the dissolve snaps
+        // to nothing. The shell path keeps its own handshake untouched.
+        if (!_benchmarkOverShell
+            && !_menuFlow.HoldFrameWanted
+            && !_menuFlow.HeldFrameReady
+            && state.PreviewLoader is { HasResult: true })
+        {
+            _menuFlow.HeldFrameReady = true;
+            _menuFlow.HeldFrameIsPicture = false;
         }
 
         switch (_benchmarkPhase)
@@ -620,6 +676,14 @@ public sealed partial class GameHost
         {
             HardwareTiering.ApplyChoice(_benchmarkWinner, _window);
             RestoreBenchmarkEnvironment();
+
+            // The decision is also the retail menu's: the Graphics screen reads its record,
+            // not the variables, so the record is re-seeded from the live stores the tier
+            // just set -- otherwise the screen would keep showing the pre-run values while
+            // the game played the decided ones. The run happens over the menus, so the
+            // re-seed is the order that needs it; the record-only fields keep whatever the
+            // record already held, as the benchmark decides none of them.
+            _retailMenus?.SyncGraphicsFromLive();
         }
         else
         {
@@ -667,7 +731,10 @@ public sealed partial class GameHost
     /// </remarks>
     private void RestoreBenchmarkShowcase(FrameLoopState state)
     {
-        if (_session.Mission is not null)
+        // Only the shell had a backdrop showing to go back to. Over the retail menu nothing
+        // was showing: the station the run adopted stays the scene behind the menu, which
+        // draws over it, until a mission promotes or replaces it.
+        if (!_benchmarkOverShell || _session.Mission is not null)
         {
             return;
         }
@@ -739,12 +806,24 @@ public sealed partial class GameHost
     /// </remarks>
     private void UpdateBenchmarkInput(FrameLoopState state)
     {
-        if (!BenchmarkRunning)
+        // The retail menus stay deaf and hidden while the benchmark owns the frame -- the
+        // prompt or the run -- so a tap on its buttons cannot also fire a menu entry under
+        // them. Said every frame, so every way out of the prompt or the run (an answer, a
+        // close, an abort) unsuppresses without a matching call at each exit.
+        _retailMenus?.Suppressed = BenchmarkRunning || _benchmarkPromptUp;
+
+        if (!BenchmarkRunning && !_benchmarkPromptUp)
         {
             return;
         }
 
         InputState input = _window.Input;
+
+        if (_benchmarkPromptUp)
+        {
+            AnswerBenchmarkPrompt(state, input);
+            return;
+        }
 
         if (input.Keyboard.WasPressed(KeyCode.Escape))
         {
@@ -816,6 +895,80 @@ public sealed partial class GameHost
         }
     }
 
+    // The first-run prompt's answer: either button runs the benchmark; only "dont show it
+    // again" sets the flag, and it is saved before the run starts, so a crash mid-run never
+    // re-prompts. Escape and Back do nothing here -- there is no third option, and the run
+    // itself is skippable. A tap anywhere else is ignored: the prompt waits for an answer.
+    private void AnswerBenchmarkPrompt(FrameLoopState state, InputState input)
+    {
+        bool dismiss = false;
+        bool answer = false;
+
+        if (input.Keyboard.WasPressed(KeyCode.Return) || input.Keyboard.WasPressed(KeyCode.NumpadEnter))
+        {
+            answer = true;
+        }
+
+        float clickX = 0f, clickY = 0f;
+        bool click = false;
+        if (input.Touch.InUse)
+        {
+            foreach (var point in input.Touch.Points)
+            {
+                if (point.Began)
+                {
+                    click = true;
+                    clickX = point.X;
+                    clickY = point.Y;
+                    break;
+                }
+            }
+        }
+
+        if (!click && input.Mouse.WasPressed(MouseButton.Left))
+        {
+            click = true;
+            clickX = input.Mouse.X;
+            clickY = input.Mouse.Y;
+        }
+
+        if (click)
+        {
+            float width = SafeWindowWidth;
+            float height = SafeWindowHeight;
+            float scale = Math.Clamp(height / 480f, 1f, 3f);
+            if (BenchmarkPromptDismissRect(width, height, scale).Contains(clickX, clickY))
+            {
+                answer = true;
+                dismiss = true;
+            }
+            else if (BenchmarkPromptYesRect(width, height, scale).Contains(clickX, clickY))
+            {
+                answer = true;
+            }
+        }
+
+        if (!answer)
+        {
+            return;
+        }
+
+        _benchmarkPromptUp = false;
+        if (dismiss)
+        {
+            BenchmarkCVars.PromptDismissed.Value = true;
+            state.Console.SaveSettings();
+            _logger.Information("Benchmark", "First-run benchmark prompt dismissed for good; running the benchmark.");
+        }
+        else
+        {
+            _logger.Information("Benchmark", "First-run benchmark prompt answered yes; running the benchmark.");
+        }
+
+        input.Mouse.SetButton(MouseButton.Left, down: false);
+        StartBenchmark(state, manual: false);
+    }
+
     // The heads-up display's bottom panel: tier rows and the status line above the SKIP band.
     private const float BenchmarkHudHeight = 132f;
 
@@ -850,6 +1003,31 @@ public sealed partial class GameHost
         UiRect panel = BenchmarkResultsPanel(width, height, scale);
         float btnH = 36f * scale;
         float btnW = (panel.Width - (60f * scale)) * 0.45f - (12f * scale);
+        float btnY = panel.Y + panel.Height - btnH - (16f * scale);
+        return new UiRect(panel.X + panel.Width - btnW - (20f * scale), btnY, btnW, btnH);
+    }
+
+    private static UiRect BenchmarkPromptPanel(float width, float height, float scale)
+    {
+        float panelW = Math.Min(560f * scale, width - (32f * scale));
+        float panelH = 196f * scale;
+        return new UiRect((width - panelW) * 0.5f, (height - panelH) * 0.5f, panelW, panelH);
+    }
+
+    private static UiRect BenchmarkPromptYesRect(float width, float height, float scale)
+    {
+        UiRect panel = BenchmarkPromptPanel(width, height, scale);
+        float btnH = 36f * scale;
+        float btnW = (panel.Width - (60f * scale)) * 0.40f;
+        float btnY = panel.Y + panel.Height - btnH - (16f * scale);
+        return new UiRect(panel.X + (20f * scale), btnY, btnW, btnH);
+    }
+
+    private static UiRect BenchmarkPromptDismissRect(float width, float height, float scale)
+    {
+        UiRect panel = BenchmarkPromptPanel(width, height, scale);
+        float btnH = 36f * scale;
+        float btnW = (panel.Width - (60f * scale)) * 0.60f - (12f * scale);
         float btnY = panel.Y + panel.Height - btnH - (16f * scale);
         return new UiRect(panel.X + panel.Width - btnW - (20f * scale), btnY, btnW, btnH);
     }
@@ -893,6 +1071,77 @@ public sealed partial class GameHost
         {
             DrawBenchmarkHud(state, painter, type, width, height, scale);
         }
+
+        state.Batch.End();
+        _device.EndStageTiming();
+    }
+
+    /// <summary>Draws the first-run benchmark prompt: the ask, what the run does, and the two answers.</summary>
+    private void DrawBenchmarkPrompt(FrameLoopState state)
+    {
+        if (!_benchmarkPromptUp)
+        {
+            return;
+        }
+
+        _shellType ??= UiFontLibrary.Typography(_device);
+        if (_shellType is not { } type)
+        {
+            return;
+        }
+
+        float width = SafeWindowWidth;
+        float height = SafeWindowHeight;
+        float scale = Math.Clamp(height / 480f, 1f, 3f);
+
+        _device.BeginStageTiming(RenderStage.UserInterface);
+        _device.Set2DProjection(SafeWindowWidth, SafeWindowHeight);
+        state.Batch.Begin();
+
+        var painter = UiPainter.Create(state.Batch, new LayoutContext(SafeWindowWidth, SafeWindowHeight));
+
+        Bgra32 accent = Bgra32.FromRgb(80, 160, 255);
+        Bgra32 panelBg = Bgra32.FromRgba(8, 14, 28, 252);
+
+        painter.FillRect(new UiRect(0f, 0f, width, height), Bgra32.FromRgba(0, 0, 0, 120));
+
+        UiRect panel = BenchmarkPromptPanel(width, height, scale);
+        painter.FillRect(panel, panelBg);
+        painter.StrokeRect(panel, 1.5f * scale, accent);
+
+        float x = panel.X + (20f * scale);
+        painter.DrawText(type.Heading, "BENCHMARK THIS DEVICE?", new UiVec2(x, panel.Y + (16f * scale)), 20f * scale, Bgra32.White);
+
+        float lineY = panel.Y + (48f * scale);
+        float lineH = 18f * scale;
+        Bgra32 body = Bgra32.FromRgb(150, 180, 220);
+        painter.DrawText(type.Mono, "MEASURES THIS DEVICE OVER THE WEATHER STATION AND PICKS", new UiVec2(x, lineY), 12f * scale, body);
+        painter.DrawText(type.Mono, "THE BEST GRAPHICS SETTINGS FOR IT. TAKES ABOUT A MINUTE.", new UiVec2(x, lineY + lineH), 12f * scale, body);
+        painter.DrawText(type.Mono, "THE DECIDED SETTINGS ARE APPLIED TO THE GRAPHICS MENU.", new UiVec2(x, lineY + (2f * lineH)), 12f * scale, body);
+        painter.DrawText(type.Mono, "YOU CAN RUN IT AGAIN ANY TIME FROM THE CHEATS MENU.", new UiVec2(x, lineY + (3f * lineH)), 12f * scale, body);
+
+        UiRect yes = BenchmarkPromptYesRect(width, height, scale);
+        painter.FillRect(yes, Bgra32.FromRgba(25, 32, 50, 200));
+        painter.StrokeRect(yes, 1.5f * scale, accent);
+        UiVec2 yesExtent = type.Mono.Measure("YES", 12f * scale);
+        painter.DrawText(
+            type.Mono,
+            "YES",
+            new UiVec2(yes.X + ((yes.Width - yesExtent.X) * 0.5f), yes.Y + (11f * scale)),
+            12f * scale,
+            Bgra32.White);
+
+        UiRect dismiss = BenchmarkPromptDismissRect(width, height, scale);
+        painter.FillRect(dismiss, Bgra32.FromRgba(25, 32, 50, 200));
+        painter.StrokeRect(dismiss, 1.5f * scale, Bgra32.FromRgb(70, 100, 140));
+        string dismissText = "YES (DONT SHOW IT AGAIN)";
+        UiVec2 dismissExtent = type.Mono.Measure(dismissText, 12f * scale);
+        painter.DrawText(
+            type.Mono,
+            dismissText,
+            new UiVec2(dismiss.X + ((dismiss.Width - dismissExtent.X) * 0.5f), dismiss.Y + (11f * scale)),
+            12f * scale,
+            Bgra32.White);
 
         state.Batch.End();
         _device.EndStageTiming();
