@@ -255,7 +255,7 @@ public sealed partial class GameHost
         // arm keeps it while blur is the only reason the capture is open and no shadow is
         // in play. A genuinely Dynamic frame keeps the grade it asked for. The shadow
         // reading matches ApplyCapturePath, which derives the capture flags from the blur,
-        // the shadows, the render scale and dynamic resolution together.
+        // the shadows and the render scale together.
         bool resolveIdentity = _gi.EffectiveLighting == LightingModel.Baked
             || (_gi.EffectiveLighting == LightingModel.Hybrid && ShadowCVars.Shadows.Value > 0)
             || (PostCVars.MotionBlur.Value > 0f && ShadowCVars.Shadows.Value <= 0);

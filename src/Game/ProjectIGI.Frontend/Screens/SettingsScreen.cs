@@ -28,8 +28,6 @@ public sealed class SettingsScreen : ShellScreen
     private static readonly int[] FpsCapValues = [30, 60, 90, 120, 0];
     private static readonly string[] FpsCapLabels = ["30 FPS", "60 FPS", "90 FPS", "120 FPS", "UNCAPPED"];
     private static readonly string[] RenderScaleLabels = ["540P (ULTRA)", "720P (PERFORMANCE)", "900P (BALANCED)", "NATIVE (MAX)"];
-    private static readonly int[] DynamicTargetValues = [30, 45, 60];
-    private static readonly string[] DynamicTargetLabels = ["30 FPS", "45 FPS", "60 FPS"];
     private static readonly float[] ViewDistanceValues = [1f, 0.1f, 0.025f];
     private static readonly string[] ViewDistanceLabels = ["FAR", "MEDIUM", "NEAR"];
     private static readonly int[] AnisotropyValues = [1, 4, 8, 16];
@@ -46,8 +44,6 @@ public sealed class SettingsScreen : ShellScreen
     private readonly float _initialUiScale;
     private readonly float _initialTextScale;
     private readonly int _initialRenderScale;
-    private readonly bool _initialDynamicResolution;
-    private readonly int _initialDynamicTargetFps;
     private readonly float _initialViewDistance;
     private readonly bool _initialShowFps;
     private readonly float _initialSunBrightness;
@@ -83,8 +79,6 @@ public sealed class SettingsScreen : ShellScreen
         _initialUiScale = DisplayCVars.UiScale.Value;
         _initialTextScale = DisplayCVars.TextScale.Value;
         _initialRenderScale = context.Host.RenderScaleMode;
-        _initialDynamicResolution = ReconstructionCVars.DynamicResolution.Value;
-        _initialDynamicTargetFps = ReconstructionCVars.DynamicTargetFps.Value;
         _initialViewDistance = ReconstructionCVars.ViewDistance.Value;
         _initialShowFps = DisplayCVars.ShowFps.Value;
         _initialSunBrightness = LightingCVars.SunBrightness.Value;
@@ -449,46 +443,6 @@ public sealed class SettingsScreen : ShellScreen
         };
         configStack.AddChild(resCycler);
 
-        // ── Dynamic Resolution: the picture shrinks itself to hold the frame rate ──
-        // The PS2 trick, done live: when the frame rate falls below the target below, the game steps
-        // the render scale down its own ladder until the rate holds, and steps back up slowly when it
-        // holds comfortably, so the picture does not flicker. Your Resolution Quality above is the
-        // ceiling -- it never renders above that -- and the archived render scale is never written,
-        // so your tier survives a relaunch exactly as picked. Off by default: a capable device
-        // renders exactly as before.
-        bool dynamicState = ReconstructionCVars.DynamicResolution.Value;
-        var dynamicToggle = new Toggle(theme, "Dynamic Resolution", dynamicState)
-        {
-            Width = 1150f,
-            Height = 68f,
-            Tooltip = "Let the game lower the render resolution itself when the frame rate falls, to hold the target below. Your Resolution Quality is the ceiling -- it never renders above that. Off renders exactly as before.",
-        };
-        dynamicToggle.ValueChanged += val =>
-        {
-            ReconstructionCVars.DynamicResolution.Value = val;
-        };
-        configStack.AddChild(dynamicToggle);
-
-        // ── Dynamic Target FPS: the rate dynamic resolution holds ────────────────
-        int currentDynamicTarget = ReconstructionCVars.DynamicTargetFps.Value;
-        int selectedDynamicTargetIndex = Array.IndexOf(DynamicTargetValues, currentDynamicTarget);
-        if (selectedDynamicTargetIndex < 0)
-        {
-            selectedDynamicTargetIndex = 0;
-        }
-
-        var dynamicTargetCycler = new OptionCycler(theme, "Dynamic Target FPS", DynamicTargetLabels, selectedDynamicTargetIndex)
-        {
-            Width = 1150f,
-            Height = 68f,
-            ContentWidth = 320f,
-        };
-        dynamicTargetCycler.SelectionChanged += index =>
-        {
-            ReconstructionCVars.DynamicTargetFps.Value = DynamicTargetValues[index];
-        };
-        configStack.AddChild(dynamicTargetCycler);
-
         // ── View Distance: how far the world draws ──────────────────────────────
         // Shortens the far plane: Far is the original's 100 km, Medium 10 km, Near 2.5 km. The
         // original's own fog hides everything past about two and a half kilometres anyway, so Near
@@ -834,8 +788,6 @@ public sealed class SettingsScreen : ShellScreen
             Context.Host.TouchOpacity = _initialOpacity;
             Context.Host.TouchSensitivity = _initialSensitivity;
             Context.Host.RenderScaleMode = _initialRenderScale;
-            ReconstructionCVars.DynamicResolution.Value = _initialDynamicResolution;
-            ReconstructionCVars.DynamicTargetFps.Value = _initialDynamicTargetFps;
             ReconstructionCVars.ViewDistance.Value = _initialViewDistance;
             ReconstructionCVars.FrameLimit.Value = _initialFpsCap;
             DisplayCVars.UiScale.Value = _initialUiScale;

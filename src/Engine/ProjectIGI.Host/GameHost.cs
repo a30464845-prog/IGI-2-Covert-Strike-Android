@@ -50,13 +50,9 @@ public sealed partial class GameHost : IDisposable
     // a 2.5 km far plane still contains it entirely and it never moves.
     private float FarPlane => ViewPlanes.FarMetres * ReconstructionCVars.ViewDistance.Value;
 
-    // The render scale in force: the manual tier's, unless dynamic resolution is on and has stepped
-    // the picture down to hold its target. The archived render scale is never written -- the manual
-    // tier stays exactly as the player picked it, and turning dynamic resolution off restores it.
-    private float EffectiveRenderScale() =>
-        ReconstructionCVars.DynamicResolution.Value
-            ? Math.Min(ReconstructionCVars.RenderScale.Value, _dynamicResolution.Scale)
-            : ReconstructionCVars.RenderScale.Value;
+    // The render scale in force: the manual tier's, exactly as the player picked it. The render
+    // scale is never written by the frame loop, so the tier survives a relaunch exactly as picked.
+    private float EffectiveRenderScale() => ReconstructionCVars.RenderScale.Value;
 
     // How long a load will hold for the lighting before giving up and letting the player in anyway. A
     // level that somehow never finishes tracing must not become a game that never starts.
@@ -340,10 +336,6 @@ public sealed partial class GameHost : IDisposable
 
     // How the level's models give up detail with distance, or none.
     private ModelLodPolicy? _modelLod;
-
-    // The dynamic-resolution ladder: steps the render scale down to hold its target frame rate, and
-    // back up when the rate holds comfortably. Fed once per presented frame, in a mission only.
-    private readonly DynamicResolution _dynamicResolution = new();
 
     // The camera the last frame was drawn from, which the ear follows; null before a level has drawn one.
     private Camera3D? _earCamera;
@@ -690,9 +682,7 @@ public sealed partial class GameHost : IDisposable
                 $"Hardware tier {_options.HardwareTier} applied for a first run: "
                     + $"r_scale={ReconstructionCVars.RenderScale.Value:0.###}, "
                     + $"r_texture_quality={MaterialCVars.TextureQuality.Value}, "
-                    + $"r_view_distance={ReconstructionCVars.ViewDistance.Value:0.###}, "
-                    + $"r_dynamic_resolution={ReconstructionCVars.DynamicResolution.Value}, "
-                    + $"r_dynamic_target_fps={ReconstructionCVars.DynamicTargetFps.Value}.");
+                    + $"r_view_distance={ReconstructionCVars.ViewDistance.Value:0.###}.");
         }
 
         // The first-run benchmark prompt: armed unless the player dismissed it for good, so
