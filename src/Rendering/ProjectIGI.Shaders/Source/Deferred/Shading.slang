@@ -214,6 +214,9 @@ struct Light
 
     // x how bright the brightest star is drawn (nought: no stars), y cloud cover, z seconds, w unused.
     float4 stars;
+
+    // rgb the retail fog's colour, w its extinction per metre (nought: none).
+    float4 retailFog;
 };
 
 OPENIGI_PUSH_CONSTANT(Light, light);
@@ -292,6 +295,23 @@ float3 ApplyFog(float3 colour, float2 uv, float viewZ)
     float slice = (log2(max((viewZ * gi.fog.x) + gi.fog.y, 1e-6)) * gi.fog.z - 1.0) * gi.fog.w;
     float4 fog = uFogVolume.SampleLevel(uFogVolumeSampler, float3(uv, clamp(slice, 0.0, 1.0)), 0.0);
     return (colour * fog.a) + fog.rgb;
+}
+
+// The original's distance fog, for a frame the froxel volume is not fogging: the surface fades
+// into the level's own air colour as exp(-density * view depth), exactly as the forward path
+// fogs it (Mesh3D.slang, SceneFog.FactorAt). Exclusive with the volume -- the presets run one
+// or the other, and both would fog the frame twice -- so a volume in force leaves the colour
+// alone here. The sky is never fogged this way: the original draws its dome unfogged, and the
+// two sky returns below do not call this.
+float3 ApplyRetailFog(float3 colour, float viewZ)
+{
+    if (light.retailFog.w <= 0.0 || gi.fog.z > 0.0)
+    {
+        return colour;
+    }
+
+    float factor = clamp(exp(-light.retailFog.w * max(viewZ, 0.0)), 0.0, 1.0);
+    return lerp(light.retailFog.rgb, colour, factor);
 }
 
 
@@ -597,9 +617,10 @@ float4 fragmentMain(Varyings input) : SV_Target
             return (debugView == 1) ? float4(albedo, 1.0) : float4(0.0, 0.0, 0.0, 1.0);
         }
 
+        float viewZ = ViewPositionOf(vUv, depth).z;
         return float4(
             ApplyFog(
-                albedo * DecodeEmissiveStrength(material), vUv, ViewPositionOf(vUv, depth).z),
+                ApplyRetailFog(albedo * DecodeEmissiveStrength(material), viewZ), vUv, viewZ),
             1.0);
     }
 
@@ -646,7 +667,7 @@ float4 fragmentMain(Varyings input) : SV_Target
     if (model == 0)
     {
         // Baked.
-        return float4(ApplyFog((albedo * baked) + flashDiffuse, vUv, viewPos.z), 1.0);
+        return float4(ApplyFog(ApplyRetailFog((albedo * baked) + flashDiffuse, viewPos.z), vUv, viewPos.z), 1.0);
     }
 
     float3 sunDirection = normalize(mul(gi.viewToWorld, float4(light.sunDirectionModel.xyz, 0.0)).xyz);
@@ -679,7 +700,7 @@ float4 fragmentMain(Varyings input) : SV_Target
             : light.sunColourScale.rgb * ndotl * visibility;
 
         // Hybrid.
-        return float4(ApplyFog((albedo * (baked + sun) * scale) + flashDiffuse, vUv, viewPos.z), 1.0);
+        return float4(ApplyFog(ApplyRetailFog((albedo * (baked + sun) * scale) + flashDiffuse, viewPos.z), vUv, viewPos.z), 1.0);
     }
 
     float metallic = material.r;
@@ -928,8 +949,10 @@ float4 fragmentMain(Varyings input) : SV_Target
         // Dynamic.
         return float4(
             ApplyFog(
-                AerialPerspective(
-                    litDynamic, worldRayToPixel, sunDirection, sunIlluminance, viewPos.z * kMetresToKm),
+                ApplyRetailFog(
+                    AerialPerspective(
+                        litDynamic, worldRayToPixel, sunDirection, sunIlluminance, viewPos.z * kMetresToKm),
+                    viewPos.z),
                 vUv,
                 viewPos.z),
             1.0);
@@ -941,8 +964,10 @@ float4 fragmentMain(Varyings input) : SV_Target
     // Dynamic.
     return float4(
         ApplyFog(
-            AerialPerspective(
-                litLegacy, worldRayToPixel, sunDirection, sunIlluminance, viewPos.z * kMetresToKm),
+            ApplyRetailFog(
+                AerialPerspective(
+                    litLegacy, worldRayToPixel, sunDirection, sunIlluminance, viewPos.z * kMetresToKm),
+                viewPos.z),
             vUv,
             viewPos.z),
         1.0);

@@ -67,6 +67,7 @@ public sealed partial class GraphicsDevice
             _lighting.SunColour,
             _lighting.Scale,
             _lighting.AmbientColour,
+            _fog,
             (int)_debugView,
             _frameHasPaintedSky,
             _lighting.CompleteBake,

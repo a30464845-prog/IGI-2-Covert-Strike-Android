@@ -245,13 +245,45 @@ public sealed partial class GameHost
         // A little extra edge fringing while the optics are up, on top of the ordinary value, so
         // the lens carries chromatic aberration that ramps in with the glass.
         float binocularAberration = binocularDisplay.Amount * 2f;
+        // The resolve must not grade a picture the direct path shows ungraded. While the
+        // lighting is Baked -- the Android default, and the model the direct path always
+        // shows -- the resolve's exposure, tone map and grade are pinned to the identity:
+        // letting the resolve re-expose the frame would brighten every capture-open frame
+        // (a sub-native scale, blur on) over the identical direct one. The hybrid arm keeps
+        // the pin while shadows are on -- the capture is open for the lighting there, and
+        // the term the shadows add needs no tone map to stay unclipped -- and the blur-only
+        // arm keeps it while blur is the only reason the capture is open and no shadow is
+        // in play. A genuinely Dynamic frame keeps the grade it asked for. The shadow
+        // reading matches ApplyCapturePath, which derives the capture flags from the blur,
+        // the shadows, the render scale and dynamic resolution together.
+        bool resolveIdentity = _gi.EffectiveLighting == LightingModel.Baked
+            || (_gi.EffectiveLighting == LightingModel.Hybrid && ShadowCVars.Shadows.Value > 0)
+            || (PostCVars.MotionBlur.Value > 0f && ShadowCVars.Shadows.Value <= 0);
+        ToneMapOperator toneMap = resolveIdentity ? ToneMapOperator.None : ExposureCVars.ToneMap.Value;
+        float exposure = resolveIdentity ? 1f : ExposureCVars.EffectiveExposure;
+        bool autoExposure = resolveIdentity ? false : ExposureCVars.AutoExposure.Value;
+
+        // The grade goes with them. The pin above promises the resolve the identity -- no tone
+        // map, no exposure -- because the direct path shows the picture ungraded, but the
+        // resolve still applies the rest of the grade afterwards: the lookup, the contrast and
+        // saturation, the grain and the sharpening all read the player's Image Style, which the
+        // direct path never sees. Under the pin they are the untouched values instead, whatever
+        // the style says. Gamma stays the player's: it is a live slider, deliberately unpinned.
+        float contrast = resolveIdentity ? 1f : PostCVars.Contrast.Value;
+        float saturation = resolveIdentity ? 1f : PostCVars.Saturation.Value;
+        float grain = resolveIdentity ? 0f : PostCVars.Grain.Value;
+        float sharpen = resolveIdentity ? 0f : PostCVars.Sharpen.Value;
+        float colourLookup = resolveIdentity ? 0f : PostCVars.ColourLookup.Value;
+
         PostProcessSettings postProcess = new(
-            ExposureCVars.ToneMap.Value,
+            toneMap,
 
             // The player's brightness less whatever the night is taking off it; see
             // ExposureCVars.EffectiveExposure. Never r_exposure directly -- the night must not be
-            // able to edit, and then have to put back, the setting the player chose.
-            ExposureCVars.EffectiveExposure,
+            // able to edit, and then have to put back, the setting the player chose. Under baked
+            // lighting this is 1: the direct path never exposed the picture, so neither may the
+            // resolve.
+            exposure,
             PostCVars.Bloom.Value,
             PostCVars.BloomThreshold.Value,
             ExposureCVars.WhitePoint.Value,
@@ -260,18 +292,18 @@ public sealed partial class GameHost
             // baked and vanilla models keep the original's gamma-space compositing, whose buffer is
             // display-encoded and has to be decoded before the tone map.
             SceneIsDisplayEncoded: _gi.EffectiveLighting != LightingModel.Dynamic,
-            Contrast: PostCVars.Contrast.Value,
-            Saturation: PostCVars.Saturation.Value,
+            Contrast: contrast,
+            Saturation: saturation,
             Vignette: PostCVars.Vignette.Value,
-            Grain: PostCVars.Grain.Value,
+            Grain: grain,
             ChromaticAberration: MathF.Max(PostCVars.ChromaticAberration.Value, binocularAberration),
-            Sharpen: PostCVars.Sharpen.Value,
+            Sharpen: sharpen,
             Gamma: PostCVars.Gamma.Value,
             MotionBlur: MathF.Max(PostCVars.MotionBlur.Value, computerFlightBlur),
             SpatialAa: PostCVars.SpatialAa.Value,
             SpatialAaThreshold: PostCVars.SpatialAaThreshold.Value,
-            ColourLookup: PostCVars.ColourLookup.Value,
-            AutoExposure: ExposureCVars.AutoExposure.Value,
+            ColourLookup: colourLookup,
+            AutoExposure: autoExposure,
             GreenPhosphor: false,
             Tactical: computerDisplay,
             Binocular: binocularDisplay,

@@ -900,10 +900,10 @@ public sealed class TouchControls
             _computerLayout.Add(new TouchButtonSpot(TouchButton.Close, new UiVec2(safe.Right - Px(90f), safe.Y + Px(90f)), Px(ButtonRadius)));
         }
 
-        // The map computer's own controls, at the very top centre, only while it is open:
+        // The map computer's own controls, at the very bottom centre, only while it is open:
         // zoom out and in flanking a fixed navigation stick, which pans the map. The stick is
         // a little smaller than the movement stick; the zoom buttons sit clear of its reach.
-        ComputerStickRest = new UiVec2(safe.X + (safe.Width * 0.5f), safe.Y + Px(110f));
+        ComputerStickRest = new UiVec2(safe.X + (safe.Width * 0.5f), safe.Bottom - Px(110f));
         ComputerStickReachPixels = Px(110f);
         _computerLayout.Add(new TouchButtonSpot(TouchButton.ZoomOut, new UiVec2(ComputerStickRest.X - Px(300f), ComputerStickRest.Y), Px(CornerRadius), ElementId: TouchElementId.ZoomOut));
         _computerLayout.Add(new TouchButtonSpot(TouchButton.ZoomIn, new UiVec2(ComputerStickRest.X + Px(300f), ComputerStickRest.Y), Px(CornerRadius), ElementId: TouchElementId.ZoomIn));

@@ -104,7 +104,7 @@ public static class DeferredLightingParameters
     public const int GiFloats = DeferredLightingBlocks.GiBytes / sizeof(float);
 
     /// <summary>How many floats the per-draw light block holds.</summary>
-    public const int LightFloats = 24;
+    public const int LightFloats = 28;
 
     /// <summary>How many cascades the block has room for.</summary>
     public const int Cascades = 4;
@@ -267,6 +267,7 @@ public static class DeferredLightingParameters
     /// <param name="sunColour">The sun's colour.</param>
     /// <param name="lightScale">What the frame's lighting is multiplied by.</param>
     /// <param name="ambient">The flat ambient a surface falls back to.</param>
+    /// <param name="fog">The frame's retail distance fog: the colour a surface tends to, and its extinction per metre; nought density is none.</param>
     /// <param name="debugView">Which debug view is in force, or nought for the picture.</param>
     /// <param name="paintedSky">Whether the title draws its own sky rather than the marched one.</param>
     /// <param name="bakesWhole">Whether the level's baked light is complete.</param>
@@ -279,6 +280,7 @@ public static class DeferredLightingParameters
         in Vector3f sunColour,
         float lightScale,
         in Vector3f ambient,
+        in SceneFog fog,
         float debugView = 0f,
         bool paintedSky = false,
         bool bakesWhole = true,
@@ -320,5 +322,13 @@ public static class DeferredLightingParameters
         // Wrapped at an hour: the twinkle only wants a phase, and a float counting up a whole session
         // loses the fraction a slow sine needs.
         block[22] = night.Seconds % 3600f;
+
+        // retailFog: the colour the original's distance fog tends to, and its extinction per
+        // metre. Nought density -- the fog the frame sets when r_fog_retail is off -- says none,
+        // and the shader leaves the colour alone rather than fogging towards black.
+        block[24] = fog.Colour.X;
+        block[25] = fog.Colour.Y;
+        block[26] = fog.Colour.Z;
+        block[27] = MathF.Max(fog.DensityPerMetre, 0f);
     }
 }
