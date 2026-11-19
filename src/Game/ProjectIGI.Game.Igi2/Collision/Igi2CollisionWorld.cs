@@ -2,6 +2,7 @@ using System.Globalization;
 using ProjectIGI.Core.Numerics;
 using ProjectIGI.Formats;
 using ProjectIGI.Formats.World;
+using ProjectIGI.Game.Igi2.Soldiers;
 using ProjectIGI.Game.Igi2.World;
 using ProjectIGI.Game.Physics;
 using ProjectIGI.Game.World;
@@ -668,7 +669,7 @@ public sealed class Igi2CollisionWorld : IIgi2CollisionQuery, IIgi2SightQuery, I
 
             foreach (Igi2BoneCollider body in _bodies)
             {
-                if ((objectGroups & (body.Group | EveryTypeGroup)) != 0)
+                if (IsInWorld(body) && (objectGroups & (body.Group | EveryTypeGroup)) != 0)
                 {
                     Igi2BoneLineOfSight.Meet(body, sight);
                 }
@@ -698,6 +699,12 @@ public sealed class Igi2CollisionWorld : IIgi2CollisionQuery, IIgi2SightQuery, I
 
         return sight.IsClear;
     }
+
+    /// <summary>Whether a boned body a line may meet: a soldier out of the world -- its container not running, or a generator
+    /// life not spawned yet -- is not there to be met, as a placed solid out of the world is not. The player's body is never
+    /// out of the world, and a dead soldier's stays in, so both still meet lines as today.</summary>
+    private static bool IsInWorld(Igi2BoneCollider body) =>
+        body.Owner is not Igi2HumanSoldier { IsActive: false };
 
     /// <summary>Whether a placed object's type has no line-of-sight handler; an attachment is a magic object of its own and has one.</summary>
     private static bool PassesSight(object owner) =>
@@ -808,7 +815,7 @@ public sealed class Igi2CollisionWorld : IIgi2CollisionQuery, IIgi2SightQuery, I
         {
             foreach (Igi2BoneCollider body in _bodies)
             {
-                if ((groups & (body.Group | EveryTypeGroup)) != 0)
+                if (IsInWorld(body) && (groups & (body.Group | EveryTypeGroup)) != 0)
                 {
                     body.TraceLines(trace);
                 }
