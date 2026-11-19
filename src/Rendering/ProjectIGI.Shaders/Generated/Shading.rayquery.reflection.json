@@ -576,7 +576,7 @@
   ],
   "pushBlock": {
     "name": "light",
-    "size": 96,
+    "size": 112,
     "group": 3,
     "binding": 0,
     "hlsl": {

@@ -25,7 +25,7 @@ if (-not $version) {
 }
 
 $destination = Join-Path $root 'third-party/dxc'
-$executable = if ($IsWindows) { Join-Path $destination 'bin/x64/dxc.exe' } else { Join-Path $destination 'bin/dxc' }
+$executable = Join-Path $destination 'bin/x64/dxc.exe'
 
 if ((Test-Path $executable) -and -not $Force) {
     $reported = & $executable --version 2>&1 | Out-String
@@ -43,7 +43,7 @@ if ($IsMacOS) {
 
 # The asset names carry the build's date rather than the version, so they are read off the tagged release.
 $release = Invoke-RestMethod -Uri "https://api.github.com/repos/microsoft/DirectXShaderCompiler/releases/tags/v$version"
-$pattern = if ($IsWindows) { '^dxc_.*\.zip$' } else { '^linux_dxc_.*\.tar\.gz$' }
+$pattern = '^dxc_.*\.zip$'
 $asset = $release.assets | Where-Object { $_.name -match $pattern } | Select-Object -First 1
 if (-not $asset) {
     throw "Release v$version has no asset matching $pattern."

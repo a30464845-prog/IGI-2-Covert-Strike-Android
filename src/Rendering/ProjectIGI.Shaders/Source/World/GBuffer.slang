@@ -346,10 +346,19 @@ GBufferTargets fragmentMain(Varyings input)
     // adds its own sun, so those models keep the sampled bake exactly as before.
     if (push.normal0.w > 0.1 && push.normal0.w < 0.5)
     {
-        float3 sunDirection = float3(cSunDirectionX, cSunDirectionY, cSunDirectionZ);
-        if (dot(sunDirection, sunDirection) > 1e-8)
+        // The direction is never composed into a vector of its own. A local built purely from
+        // specialisation constants is emitted by Slang as a WGSL `const`, and an
+        // override-expression is not a const-expression: Dawn rejects the whole module, every
+        // GBuffer pipeline fails to create, and the process aborts at submit. The components
+        // stay inside expressions the runtime normal takes part in -- the way Mesh3D.slang's
+        // sunlight already does -- and the length test stays a branch condition, which an
+        // override-expression may appear in. Only a `const` initializer may not hold one.
+        if (cSunDirectionX * cSunDirectionX + cSunDirectionY * cSunDirectionY + cSunDirectionZ * cSunDirectionZ > 1e-8)
         {
-            float facing = max(dot(normal, normalize(sunDirection)), 0.0);
+            float facing = max(
+                (normal.x * cSunDirectionX + normal.y * cSunDirectionY + normal.z * cSunDirectionZ)
+                * rsqrt(cSunDirectionX * cSunDirectionX + cSunDirectionY * cSunDirectionY + cSunDirectionZ * cSunDirectionZ),
+                0.0);
             float3 sunlight = float3(cSunAmbientRed, cSunAmbientGreen, cSunAmbientBlue)
                 + float3(cSunRed, cSunGreen, cSunBlue) * facing;
             baked = clamp(sunlight, 0.0, 1.0);
