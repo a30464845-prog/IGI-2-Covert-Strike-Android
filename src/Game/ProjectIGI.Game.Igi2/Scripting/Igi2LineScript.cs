@@ -47,10 +47,20 @@ public static class Igi2LineScript
     /// <param name="natives">The script namespace: its constants and its symbols' contexts.</param>
     /// <param name="functions">The natives the text may call.</param>
     /// <returns>The expression's value, or zero when the text holds no expression or does not parse.</returns>
-    public static int Evaluate(string? source, NativeRegistry natives, Igi2ScriptFunctions functions)
+    public static int Evaluate(string? source, NativeRegistry natives, Igi2ScriptFunctions functions) =>
+        Evaluate(source, natives, functions, out _);
+
+    /// <summary>Evaluates script text as one integer expression, reporting whether it failed.</summary>
+    /// <param name="source">The text.</param>
+    /// <param name="natives">The script namespace: its constants and its symbols' contexts.</param>
+    /// <param name="functions">The natives the text may call.</param>
+    /// <param name="hasError">Whether the text did not parse, or a name in it did not resolve.</param>
+    /// <returns>The expression's value, or zero when the text holds no expression or does not parse.</returns>
+    public static int Evaluate(string? source, NativeRegistry natives, Igi2ScriptFunctions functions, out bool hasError)
     {
         ArgumentNullException.ThrowIfNull(natives);
         ArgumentNullException.ThrowIfNull(functions);
+        hasError = false;
 
         if (string.IsNullOrEmpty(source))
         {
@@ -70,10 +80,14 @@ public static class Igi2LineScript
         }
         catch (ScriptExpressionException)
         {
+            hasError = true;
             return 0;
         }
 
-        return new ScriptExpressionEvaluator(new Igi2ScriptContext(natives, functions)).EvaluateInt32(expression);
+        ScriptExpressionEvaluator evaluator = new(new Igi2ScriptContext(natives, functions));
+        int value = evaluator.EvaluateInt32(expression);
+        hasError = evaluator.HasError;
+        return value;
     }
 
     /// <summary>Evaluates script text as one string expression, as <c>Script_ParseLine</c> and <c>Expression_EvalString</c> do.</summary>
