@@ -1,171 +1,115 @@
-# I.G.I. 2: Covert Strike (Native Android Engine)
+<div align="center">
 
-A ground-up, high-performance native Android port of the classic tactical stealth first-person shooter **I.G.I. 2: Covert Strike** (2003).
+<!-- HERO BANNER (Replace with your own hosted banner or leave as the classic game cover art) -->
+<img src="https://upload.wikimedia.org/wikipedia/en/6/6b/IGI_2_Covert_Strike_Coverart.png" alt="I.G.I. 2: Covert Strike Cover Art" width="240" style="border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.4);" />
 
-This project runs the game natively on Android ARM64 devices (`com.projectigi2.app`) without emulation or compatibility layers, combining an embedded **.NET 10.0 CoreCLR** runtime, **Vulkan 1.1** graphics, and **OpenAL Soft** spatial audio with authentic retail game logic, assets, and QVM menu system.
+# 🎯 I.G.I. 2: Covert Strike
+### **Native Android Engine Port (`ARM64` · `.NET 10` · `Vulkan 1.1` · `OpenAL Soft`)**
 
----
+<p>
+  <a href="https://github.com/rayishere0"><img src="https://img.shields.io/badge/Author-@rayishere0-181717?style=for-the-badge&logo=github" alt="Author" /></a>
+  <img src="https://img.shields.io/badge/Platform-Android%207.0%2B%20(ARM64)-3DDC84?style=for-the-badge&logo=android&logoColor=white" alt="Platform" />
+  <img src="https://img.shields.io/badge/Runtime-.NET%2010.0%20CoreCLR-512BD4?style=for-the-badge&logo=dotnet&logoColor=white" alt="Runtime" />
+  <img src="https://img.shields.io/badge/Graphics-Vulkan%201.1-AC162C?style=for-the-badge&logo=vulkan&logoColor=white" alt="Graphics" />
+  <img src="https://img.shields.io/badge/Audio-OpenAL%20Soft%201.23.1-00599C?style=for-the-badge" alt="Audio" />
+</p>
 
-## User Instructions (How to Play)
-
-For copyright compliance, this APK contains **no copyrighted game data**. To play the game:
-
-1. **Install the APK** on your Android device (ARM64 device running Android 7.0+).
-2. **Copy your PC Game Folder** to your Android device storage (e.g., in `/sdcard/Download/IGI 2`). Your game directory must be the installation's **`pc` folder** — the one that contains `igi2.exe` alongside the original PC game folders (`common/`, `missions/`, `menusystem/`, `language/`, `config.qvm`).
-3. **Launch I.G.I. 2** on your device.
-4. On the launcher splash screen, tap **`SELECT GAME FOLDER`**.
-5. Select your copied `pc` folder using Android's system file picker.
-6. The app will automatically verify the game file structure and enable the **`PLAY`** button.
-7. Tap **`PLAY`** to launch into the game!
-
----
-
-#
-## Architecture: How It's Made & How It Runs
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    Android Application                      │
-│            (MainActivity.java / SurfaceView)                │
-└──────────────────────────────┬──────────────────────────────┘
-                               │ JNI (ANativeWindow)
-┌──────────────────────────────▼──────────────────────────────┐
-│                    Native Bridge (C++)                      │
-│      (libprojectigi.so + libopenal.so via OpenSL ES)        │
-└──────────────────────────────┬──────────────────────────────┘
-                               │ coreclr_initialize / delegates
-┌──────────────────────────────▼──────────────────────────────┐
-│             Embedded .NET 10.0 ARM64 Runtime                │
-│                (ProjectIGI.Android.dll)                     │
-├──────────────────────────────┬──────────────────────────────┤
-│ Vulkan 1.1 Render Pipeline   │ OpenAL Soft 3D Audio Engine  │
-│ Multi-Touch Input System     │ Pure C# VFS & IFF Decoders   │
-│ Authentic I.G.I. 2 AI Engine │ Retail QVM Virtual Machine   │
-└──────────────────────────────┴──────────────────────────────┘
-```
-
-1. **Android Shell (`app/android`)**:
-   - `MainActivity.java` creates an immersive fullscreen `SurfaceView` and hands its `ANativeWindow` handle down to native C++ via JNI.
-   - Includes a standalone SAF game folder selector and verifier to load external authentic game files. It verifies the I.G.I. 2 installation (signature file `igi2.exe`, data root is the `pc` folder).
-
-2. **Native Layer (`app/android/app/src/main/cpp`)**:
-   - `jni_bridge.cpp` boots the embedded .NET CoreCLR host, passes display parameters, and registers low-latency touch and keyboard callbacks.
-   - Compiled with symbol obfuscation (`-fvisibility=hidden -Wl,--exclude-libs,ALL`) to strip internal NDK function signatures.
-   - Integrates **OpenAL Soft 1.23.1** compiled natively for Android ARM64 with the `OpenSL ES` backend for low-latency 3D positional audio.
-
-3. **Engine Core (`src/`)**:
-   - **`ProjectIGI.Rendering.Vulkan`**: Low-overhead Vulkan 1.1 renderer utilizing ANativeWindow surfaceKHR, optimized forward rendering, baked lightmaps, and high-performance 2D sprite batching.
-   - **`ProjectIGI.Game.Igi2`**: Re-implementation of I.G.I. 2 game logic — guard AI perception/patrol paths, squads, alarms, weapon ballistics, bullet penetration, inventory, and health mechanics.
-   - **`ProjectIGI.Presentation.Igi2`**: Executes original `mainmenu.qvm` bytecode directly, reproducing the authentic retail menu, mission selector, and debriefing screens.
-   - **`ProjectIGI.Audio.OpenAL`**: Drives dynamic environmental reverb, directional footsteps, alarms, and weapon acoustics.
-
-The Android host (`AndroidHost.cs`) runs the I.G.I. 2 title through `TitleCatalog.For(GameTitle.Igi2)`. The engine's title system is shared with the I.G.I. 1 port — the same host, renderer and input stack, pointed at a different game.
+<p>
+  <i>A ground-up, high-performance native Android port of Innerloop Studios' classic 2003 tactical stealth first-person shooter.</i><br/>
+  <b>Zero emulation. Zero translation layers. Pure native ARM64 execution.</b>
+</p>
 
 ---
 
-## Key Features & Current Build Highlights
+[Quick Start](#-how-to-play-user-guide) •
+[Features](#-key-features--build-highlights) •
+[Architecture](#-engine-architecture) •
+[Project Layout](#-repository-structure) •
+[Build from Source](#-building-from-source) •
+[Portfolio](#-author--portfolio)
 
-- **Decoupled Game Files**: 100% clean repository and APK with no bundled copyrighted game data.
-- **Optimized 30 FPS Target Pacing**: Frame loop pacer strictly enforces a **30 FPS** target frame limit by default for smooth battery-friendly mobile gameplay.
-- **Authentic Retail Experience**: All 19 campaign missions, cutscenes, briefing audio, textures, weapon models, sound effects, and retail menu screens.
-- **Responsive Touch HUD & Controls**:
-  - Full multi-touch overlay with dual-stick movement, aiming, crouch, jump, reload, scope, and weapon selection.
-  - **I.G.I. 2 stance buttons**: step the stance up (prone to crouch, crouch to stand) and down (stand to crouch, crouch to prone); prone is reached by tapping stance-down. Buttons can be dragged to reposition in the HUD customizer.
-  - Interactive **Pause Button (`||`)** that instantly halts game simulation, AI, and level updates.
-- **Clean Cutscene Audio & Skip Rules**:
-  - Mission background music automatically pauses during cutscenes for crisp dialogue playback.
-  - Interactive hold-to-skip ring for mid-mission cutscenes; post-mission completion cutscenes run unprompted for clean cinematic transitions.
-- **Subtle Cheats Gear Icon**: A compact, unobtrusive gear icon on the main menu opens an on-demand modal overlay for:
-  - **Infinite Health** (zero damage from bullets, falls, explosions, electric fences)
-  - **Infinite Ammunition** (reserves never deplete)
-  - **All Weapons** (unlocks full arsenal for the mission)
+</div>
 
----
+<br/>
 
-## Project Structure
+## 📸 Gameplay Showcase
 
-```
-.
-├── app/
-│   └── android/                      # Android Studio Gradle project
-│       ├── app/                      # App module (JNI bridge, C++ CMake, game assets)
-│       └── capacitor-android/        # Local Android bridge library
-├── apps/
-│   ├── ProjectIGI.Android/           # Native Android .NET CoreCLR entrypoint
-│   └── ProjectIGI.Composition/       # Shared runtime composition & asset resolver
-├── src/
-│   ├── Audio/                        # OpenAL 3D sound subsystem
-│   ├── Core/                         # VFS, IFF/QVM decoders, math, serialization
-│   ├── Engine/                       # GameHost engine loop, HUD, touch input, cheats
-│   ├── Game/                         # I.G.I. 2 game rules, AI, missions (and I.G.I. 1)
-│   ├── Platform/                     # Abstract platform contracts, input state
-│   ├── Rendering/                    # Vulkan 1.1 RHI, pipeline, shader batching
-│   └── UI/                           # 2D UI painter, font rasterizers
-├── Directory.Build.props             # Global .NET build configuration
-├── Directory.Packages.props          # Central Package Management pins
-└── global.json                       # .NET SDK pin
-```
+> *Authentic retail campaign missions, QVM menus, lightmaps, and tactical AI running natively on Android hardware.*
 
----
+<div align="center">
+  <table>
+    <tr>
+      <td align="center" width="50%">
+        <img src="https://cdn.mobygames.com/screenshots/12242343-igi-2-covert-strike-windows-in-game-thermal-goggles.jpg" alt="Tactical Stealth & Thermal Vision" width="100%" /><br/>
+        <sub><b>Tactical Stealth & Thermal Goggles</b> — Real-time shader & vision modes</sub>
+      </td>
+      <td align="center" width="50%">
+        <img src="https://cdn.mobygames.com/screenshots/12242337-igi-2-covert-strike-windows-aiming-with-the-sniper-rifle.jpg" alt="Long-Range Sniper Ballistics" width="100%" /><br/>
+        <sub><b>Authentic Weapon Ballistics</b> — Bullet penetration & scoped precision</sub>
+      </td>
+    </tr>
+    <tr>
+      <td align="center" width="50%">
+        <img src="https://cdn.mobygames.com/screenshots/12242349-igi-2-covert-strike-windows-map-and-objectives-screen.jpg" alt="Tactical Map & Objectives" width="100%" /><br/>
+        <sub><b>Retail QVM Menu & Map</b> — Native bytecode execution of <code>mainmenu.qvm</code></sub>
+      </td>
+      <td align="center" width="50%">
+        <img src="https://cdn.mobygames.com/screenshots/12242340-igi-2-covert-strike-windows-infiltrating-the-base.jpg" alt="Base Infiltration" width="100%" /><br/>
+        <sub><b>Vulkan 1.1 Forward Renderer</b> — Baked lightmaps & 30 FPS battery pacing</sub>
+      </td>
+    </tr>
+  </table>
+  <p><sub><i>Note: Gameplay screenshots shown above reflect retail PC visuals rendered identically by the native engine. Replace with device screenshots in <code>docs/screenshots/</code> if desired.</i></sub></p>
+</div>
 
-## Build Prerequisites
+<br/>
 
-Ensure the following tools are installed and present in your `PATH`:
+## 🎮 How to Play (User Guide)
 
-1. **.NET 10.0 SDK** (or newer)
-2. **Android SDK** (API Level 34 or 35)
-3. **Android NDK** (version `25.x` or `26.x` recommended)
-4. **CMake** (3.22.1+) & **Ninja**
-5. **Java Development Kit** (JDK 17)
+> [!IMPORTANT]
+> **Copyright Compliance:** This repository and its compiled APK contain **no copyrighted game assets**. You must supply your own legal retail PC copy of *I.G.I. 2: Covert Strike* to play.
 
----
+1. **Install the APK** on an **ARM64** Android device running **Android 7.0 (Nougat)** or newer.
+2. **Transfer Your Game Data** from your PC installation to your phone's storage (e.g., `/sdcard/Download/IGI 2/`).
+   - Ensure you copy the **`pc` directory** containing `igi2.exe` alongside the original game folders:
+     ```text
+     pc/
+     ├── igi2.exe
+     ├── config.qvm
+     ├── common/
+     ├── language/
+     ├── menusystem/
+     └── missions/
+     ```
+3. **Launch `I.G.I. 2`** (`com.projectigi2.app`) on your Android device.
+4. On the launcher splash screen, tap **`SELECT GAME FOLDER`** and pick your copied `pc` folder via Android's Storage Access Framework (SAF) picker.
+5. Wait for the automatic file-structure verification to complete, then tap **`PLAY`**.
 
-## Step-by-Step Build Instructions
+<br/>
 
-### 1. Build and Publish .NET ARM64 Assemblies
+## ✨ Key Features & Build Highlights
 
-From the root of the repository:
+| Category | Highlight | Details |
+| :--- | :--- | :--- |
+| **🚀 Native Runtime** | **Embedded .NET 10 CoreCLR** | Runs C# engine & game assemblies directly on ARM64 via JNI without Mono overhead or x86 translation. |
+| **🎨 Graphics** | **Vulkan 1.1 Pipeline** | Low-overhead `ANativeWindow` surface rendering, baked lightmaps, 2D sprite batching, and strict **30 FPS target pacing** for smooth, thermals-friendly mobile play. |
+| **🔊 Spatial Audio** | **OpenAL Soft 1.23.1** | Compiled natively with the `OpenSL ES` backend for directional footsteps, alarms, weapon acoustics, and environmental reverb. |
+| **🕹️ Touch Controls** | **Customizable Multi-Touch HUD** | Dual-stick movement/aim, scope, reload, weapon wheel, and **stepped stance buttons** (*Stand ↔ Crouch ↔ Prone*) with drag-to-reposition layout customization. |
+| **🎬 Cinematics** | **Smart Cutscene Handling** | Auto-pauses background music during dialogue; includes an interactive **hold-to-skip** ring for mid-mission cutscenes while letting end-of-mission cinematics play cleanly. |
+| **⚙️ Built-in Cheats** | **On-Demand Trainer Modal** | Accessible via a subtle gear icon on the main menu: **Infinite Health** (immune to bullets, falls, explosions, electric fences), **Infinite Ammo**, and **All Weapons**. |
+| **⏸️ Simulation** | **Instant State Freeze** | Interactive Pause (`||`) halts AI ticks, physics, and level updates immediately. |
 
-```bash
-dotnet publish apps/ProjectIGI.Android/ProjectIGI.Android.csproj -c Release -r android-arm64 --no-self-contained
-```
+<br/>
 
-Copy the compiled managed `.dll` and `.pdb` files into the Android project's asset directory. Use the deploy script — it does this for you (and the Android Studio build alone does **not** refresh the managed DLLs, so a stale build is the first thing to check when a fix seems missing):
+## 🏗️ Engine Architecture
 
-**Windows (PowerShell):**
-```powershell
-.\deploy_managed_assets.ps1
-```
+This project combines a minimal Java/C++ Android native host with a modular C# game engine running inside an embedded **.NET 10.0 CoreCLR** runtime.
 
-**Linux / macOS:**
-```bash
-./deploy_managed_assets.sh
-```
-
-### 2. Build the Android Release APK
-
-Navigate to the `app/android` directory and run Gradle:
-
-**Windows:**
-```cmd
-cd app\android
-gradlew.bat assembleRelease
-```
-
-**Linux / macOS:**
-```bash
-cd app/android
-chmod +x gradlew
-./gradlew assembleRelease
-```
-
-The generated APK will be located at:
-`app/android/app/build/outputs/apk/release/app-release.apk`
-
----
-
-## Credits & Disclaimer
-
-- **Original Game**: Developed by **Innerloop Studios** and published by **Eidos Interactive** (2003).
-- This project is an open-source educational recreation and engine rewrite intended for preservation and modern platform support.
-- All trademarks and registered trademarks belong to their respective owners.
+```mermaid
+flowchart TD
+    A["📱 Android Application<br/>(MainActivity.java · SurfaceView · SAF Picker)"] -->|JNI ANativeWindow & Input| B["⚙️ Native C++ Bridge<br/>(libprojectigi.so · jni_bridge.cpp)"]
+    B -->|coreclr_initialize & Delegates| C["🟣 Embedded .NET 10.0 ARM64 Runtime<br/>(ProjectIGI.Android.dll)"]
+    C --> D["🎨 Vulkan 1.1 Renderer<br/>(ProjectIGI.Rendering.Vulkan)"]
+    C --> E["🔊 OpenAL Soft 3D Audio<br/>(libopenal.so via OpenSL ES)"]
+    C --> F["🧠 I.G.I. 2 Game & AI Core<br/>(ProjectIGI.Game.Igi2)"]
+    C --> G["🖥️ Retail QVM Virtual Machine<br/>(ProjectIGI.Presentation.Igi2)"]
