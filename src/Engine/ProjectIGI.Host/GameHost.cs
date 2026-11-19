@@ -131,6 +131,35 @@ public sealed partial class GameHost : IDisposable
         && !_loadSequence.IsActive
         && !BenchmarkRunning;
 
+    /// <summary>
+    /// Gets whether a retail menu screen stands over the frame, painting it opaque, so the level behind it is never seen.
+    /// </summary>
+    /// <remarks>
+    /// Every retail screen paints a full-screen opaque background (its script's background, or the mission-select cover),
+    /// and on the retail path no backdrop was ever adopted behind the menu in the first place: every RequestBackdrop path
+    /// needs OverShowcase, MenuMode or a benchmark run, so before the benchmark the scene was null and RenderWorld never
+    /// ran. The benchmark adopts the Weather Station and leaves it adopted, and from then on the direct-path 3D pass draws
+    /// after the task-walk menu and covers it -- the menu stays alive (clicks, sounds) under a picture it cannot be seen
+    /// through. Holding the capture off (#100) fixed the resolve wiping it; it cannot fix the direct pass covering it.
+    /// Skipping the 3D while a retail menu stands over no mission restores exactly the pre-benchmark frame: the menu alone,
+    /// plus the overlays drawn after it. It also stops rendering a level nobody can see. The going-in sequence is safe: a
+    /// pending load or a running entry shot opens the gate again before the capture frame, and the benchmark's own prompt
+    /// and run are excluded, so the prompt keeps its drone view behind it. A playing cutscene opens the gate too, so a
+    /// cinematic over the menu renders exactly as it did before this change.
+    /// </remarks>
+    private bool RetailMenuCoversScene =>
+        _retailMenus is not null
+        && _session.Mission is null
+        && !_session.FailedMenu
+        && !_menuFlow.MenuMode
+        && !_menuFlow.PauseMenu
+        && !_loadSequence.IsActive
+        && !BenchmarkRunning
+        && !_benchmarkPromptUp
+        && !EnteringMission
+        && _mission.Cutscenes?.IsPlaying != true
+        && TitlePlayer is not { IsCutscenePlaying: true };
+
     // --- Environment, supplied by the composition root ---
     private readonly IPlatformHost _platform;
     private readonly IWorkScheduler _work;
