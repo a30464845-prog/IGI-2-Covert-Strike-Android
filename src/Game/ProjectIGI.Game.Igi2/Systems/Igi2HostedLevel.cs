@@ -396,6 +396,31 @@ public sealed class Igi2HostedLevel
 
         FollowWorld(initial: false);
 
+        // A soldier whose mind never started is drawn but never ticked: its container is dormant, so no
+        // Update ever steps its main clip. Step the clip it was given at spawn so it idles at its post
+        // instead of holding its bind pose -- the T-pose. Pose only: no locomotion machine (a bare
+        // Locomotion.Tick would send it into Fall, its Grounded bit set only by the ground probe inside a
+        // full Update), no channels, no gameplay systems. A dead soldier is left alone -- its stand clip
+        // must not keep playing. Once the container wakes, the mind's first tick takes over and this stops.
+        // The gate is the mind's own "never ran" signal, not HasStarted alone: a scriptless mind runs its
+        // fallback Update every tick without ever setting HasStarted, so stepping it here as well would
+        // play its clip twice as fast. A scriptless soldier therefore only gets the stand clip from spawn
+        // and starts stepping once its container wakes and the fallback runs.
+        foreach ((HumanTask host, Igi2HumanSoldier body) in _standIns)
+        {
+            bool mindNeverRan = body.Mind switch
+            {
+                Igi2StandingSoldierMind standing => !standing.HasStarted,
+                Igi2HumanAi ai => !ai.HasStarted && ai.Script is not null && ai.Graph is not null,
+                _ => false,
+            };
+            if (_inWorld.GetValueOrDefault(host) && !body.IsDead && mindNeverRan)
+            {
+                body.Animation.StepMain();
+                body.TouchPose();
+            }
+        }
+
         // The player's factor for the tick just run, which the soldiers' detection reads on the next.
         Visibility?.Update();
 
