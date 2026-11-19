@@ -461,6 +461,15 @@ public sealed class Igi2Gameplay : ITitleGameplay
                     log.Warning(LogCategory, $"Soldier '{model}': no rig (model did not resolve).");
                 }
 
+                // Diagnostics: the bone names the soldier's blend masks are built from. SetBranches marks its
+                // masks from "center" and "lower body"; a model without them gets all-false masks and the blend
+                // writes nothing, so the body keeps its bind pose -- the T-pose. One line per soldier at spawn.
+                if (models(model) is { } mef)
+                {
+                    IReadOnlyList<string> names = Igi2BodyModel.From(model, mef).BoneNames;
+                    log.Information(LogCategory, $"Soldier '{model}': {names.Count} bone name(s), center {Igi2BoneBranches.IndexOf(names, Igi2BoneBranches.CenterBone)}, lower body {Igi2BoneBranches.IndexOf(names, Igi2BoneBranches.LowerBodyBone)}.");
+                }
+
                 return (surroundings, weapon, animation);
             },
             models,
