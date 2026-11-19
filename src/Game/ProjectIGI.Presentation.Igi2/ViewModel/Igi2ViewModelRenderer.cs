@@ -777,11 +777,13 @@ public sealed partial class Igi2ViewModelRenderer : ITitleViewModelPresenter, IT
         string upper = animation.UpperBody is { } upperBody
             ? $"'{upperBody.Clip?.Name ?? "none"}' t={upperBody.Time}" : "none";
         string held = soldier.Weapon.Inventory?.Current?.WeaponType.FixedModel ?? "none";
+        string mind = soldier.Mind is { } m ? $"{m.GetType().Name} started={m.HasStarted}" : "none";
         _logger.Information(LogCategory,
             $"Pose '{wanted.Model}': main '{animation.Main.Clip?.Name ?? "none"}' t={animation.Main.Time} noClip={animation.Main.IsNoClip}, " +
             $"upper {upper}, state {animation.LastState}, upper-state {soldier.UpperBodyState}, held '{held}', " +
             $"{pose.BoneCount} bones, {posed} posed [{string.Join(", ", posedNames)}], " +
-            $"root trace {rootTrace:F2}, lower-body trace {lowerTrace:F2}, skin current {SamePose(part.SkinnedPose, pose)}.");
+            $"root trace {rootTrace:F2}, lower-body trace {lowerTrace:F2}, skin current {SamePose(part.SkinnedPose, pose)}, " +
+            $"mind {mind}, active={soldier.IsActive}, pos ({soldier.Position.X:F0}, {soldier.Position.Y:F0}, {soldier.Position.Z:F0}).");
     }
 
     private static bool SamePose(BonePose? previous, BonePose current) => ReferenceEquals(previous, current)
