@@ -103,18 +103,28 @@ WaterVaryings vertexMain(WaterVertexInput input)
 {
     WaterVaryings output;
 
-    // The level's sun, inlined at its use sites rather than bound to locals: Slang's WGSL backend
-    // lowers a local built purely from pipeline constants to a WGSL `const`, and WGSL forbids an
-    // `override` inside a `const` initializer -- wgpu-native v29 refuses to parse the module and,
-    // with no uncaptured-error handler installed, aborts the process (Crash B). Mesh3D already
-    // uses its sun constants directly in expressions, which is the pattern that works.
+    // The level's sun, filled in a component at a time. A vector made whole of specialization
+    // constants is emitted to WGSL as a `const`, which an `override` may not initialise -- and
+    // inlining the same vector at two use sites is no better: Slang 2026.22 hoists the repeated
+    // pure-constant subexpression into a shared `const` temp, and Dawn refuses the module
+    // (Water wgsl:87). Component-wise assignment into a `var` cannot be hoisted that way; this
+    // is the pattern OpenIGI's Water already uses.
+    float3 sun;
+    sun.x = cSunX;
+    sun.y = cSunY;
+    sun.z = cSunZ;
+    float3 sunColour;
+    sunColour.x = cSunRed;
+    sunColour.y = cSunGreen;
+    sunColour.z = cSunBlue;
+
     float3 normal = input.normal * push.fogNormalScale.w;
 
     // r0: from the surface to the eye.
     float3 toEye = normalize(push.eyeFacing.xyz - input.position);
 
     // r1: the water's own light, the sun's cosine unclamped.
-    float3 lit = float3(cSunRed, cSunGreen, cSunBlue) * dot(normal, float3(cSunX, cSunY, cSunZ)) * push.diffuseScale.xyz
+    float3 lit = sunColour * dot(normal, sun) * push.diffuseScale.xyz
         + float3(cAmbientRed, cAmbientGreen, cAmbientBlue);
 
     // r2.x, held to the smallest the water allows, builds the reflection; oT0 is it in the cube's axes.
@@ -130,12 +140,12 @@ WaterVaryings vertexMain(WaterVertexInput input)
     output.colour0 = saturate(float4(fresnel, fresnel, fresnel, (1.0 - fresnel) * shallowness));
 
     // r7.x: the half vector's cosine to the ninth.
-    float3 halfway = normalize(toEye + float3(cSunX, cSunY, cSunZ));
+    float3 halfway = normalize(toEye + sun);
     float glint = dot(halfway, normal);
     float glint2 = glint * glint;
     float glint8 = glint2 * glint2;
     glint8 *= glint8;
-    float3 specular = push.specularFog.xyz * (glint8 * glint) * float3(cSunRed, cSunGreen, cSunBlue);
+    float3 specular = push.specularFog.xyz * (glint8 * glint) * sunColour;
 
     // oD1, which Direct3D clamps as it leaves the shader.
     output.colour1 = saturate((specular * fresnel + lit * (1.0 - fresnel)) * (1.0 - shallowness));
