@@ -8,10 +8,10 @@
 
 <p>
   <a href="https://github.com/rayishere0"><img src="https://img.shields.io/badge/Author-@rayishere0-181717?style=for-the-badge&logo=github" alt="Author" /></a>
-  <img src="https://img.shields.io/badge/Platform-Android%207.0%2B%20(ARM64)-3DDC84?style=for-the-badge&logo=android&logoColor=white" alt="Platform" />
-  <img src="https://img.shields.io/badge/Runtime-.NET%2010.0%20CoreCLR-512BD4?style=for-the-badge&logo=dotnet&logoColor=white" alt="Runtime" />
-  <img src="https://img.shields.io/badge/Graphics-Vulkan%201.1-AC162C?style=for-the-badge&logo=vulkan&logoColor=white" alt="Graphics" />
-  <img src="https://img.shields.io/badge/Audio-OpenAL%20Soft%201.23.1-00599C?style=for-the-badge" alt="Audio" />
+  <img width="619" height="495" alt="image" src="https://github.com/user-attachments/assets/2d0ab4f0-7633-4059-9043-d5f514aec07c" />
+  <img width="1600" height="1200" alt="image" src="https://github.com/user-attachments/assets/7d66cbf5-bcf4-4c42-9a0e-b3f16c4f9af4" />
+  <img width="600" height="338" alt="image" src="https://github.com/user-attachments/assets/492a7dec-3c93-413b-a56c-0db176361919" />
+  <img width="800" height="600" alt="image" src="https://github.com/user-attachments/assets/a80669ba-c432-4825-8b4f-bc6ae4abebbf" />
 </p>
 
 <p>
