@@ -575,7 +575,11 @@ public sealed partial class GameHost
         // measures is drawn below, in this same pass.
         UpdateBenchmark(state);
 
-        if (_scene is not null && _world is not null && _camera is not null)
+        // A retail menu paints the whole frame opaque, so a level adopted behind it -- the benchmark's Weather
+        // Station, left standing after the run -- is drawn after the menu and covers it, while the menu stays
+        // alive underneath. Skip the 3D while a retail menu stands over no mission; the frame is then exactly
+        // the pre-benchmark one, and the going-in sequence re-opens the gate before its capture frame.
+        if (_scene is not null && _world is not null && _camera is not null && !RetailMenuCoversScene)
         {
             RenderWorld(state, state.Console);
         }
