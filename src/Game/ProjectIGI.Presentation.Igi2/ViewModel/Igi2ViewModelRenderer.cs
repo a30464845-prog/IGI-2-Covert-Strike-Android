@@ -6,6 +6,8 @@ using ProjectIGI.Engine.Resources;
 using ProjectIGI.Formats.Animation;
 using ProjectIGI.Formats.World;
 using ProjectIGI.Game.Igi2.Animation;
+using ProjectIGI.Game.Igi2.Humans;
+using ProjectIGI.Game.Igi2.Soldiers;
 using ProjectIGI.Game.Igi2.World;
 using ProjectIGI.Game.Player;
 using ProjectIGI.Game.World;
@@ -55,6 +57,8 @@ public sealed partial class Igi2ViewModelRenderer : ITitleViewModelPresenter, IT
     private readonly List<Part> _skinBatch = [];
     private readonly Dictionary<object, Track> _tracks = [];
     private long _worldFrame;
+    private readonly HashSet<BodyKey> _poseLogged = [];
+    private readonly Dictionary<BodyKey, long> _poseFirstSeen = [];
     // The most skinning jobs at once.
     private const int SkinWorkers = 4;
 
@@ -254,6 +258,7 @@ public sealed partial class Igi2ViewModelRenderer : ITitleViewModelPresenter, IT
                 }
 
                 part.Tick = wanted.Tick;
+                LogSoldierPose(key, wanted, pose, part, instance);
                 PoseBetween(part, wanted.Tick, between);
 
                 // A body is cloth and skin, which do not shine, and is left out of the ambient occlusion: the body material
@@ -723,6 +728,61 @@ public sealed partial class Igi2ViewModelRenderer : ITitleViewModelPresenter, IT
     // Two faces moved alike: none moved, or the same weights.
     private static bool SameMorph(float[]? skinned, float[]? wanted) =>
         skinned is null ? wanted is null : wanted is not null && skinned.AsSpan().SequenceEqual(wanted);
+
+    // Diagnostics: the pose a soldier is actually drawn in, once per body after it has been
+    // seen for a while (the upper-body clip blends in over a second, so an early read would
+    // catch the main clip on the whole body). The trace of a bone's composed rotation matrix
+    // is 3.0 at identity; a posed bone reads less. One line per soldier, never per frame.
+    private void LogSoldierPose(BodyKey key, TitleWorldModel wanted, BonePose pose, Part part, object instance)
+    {
+        if (_poseLogged.Contains(key))
+        {
+            return;
+        }
+
+        if (!_poseFirstSeen.TryGetValue(key, out long firstSeen))
+        {
+            _poseFirstSeen[key] = _worldFrame;
+            return;
+        }
+
+        if (_worldFrame - firstSeen < 300)
+        {
+            return;
+        }
+
+        _poseLogged.Add(key);
+        if (instance is not Igi2HumanSoldier soldier || soldier.Animation is not Igi2HumanAnimation animation)
+        {
+            return;
+        }
+
+        int posed = 0;
+        List<string> posedNames = [];
+        IReadOnlyList<string>? names = soldier.Model?.BoneNames;
+        for (int bone = 0; bone < pose.BoneCount; bone++)
+        {
+            Matrix3f rotation = pose.Rotations[bone];
+            if (rotation.M11 + rotation.M22 + rotation.M33 < 2.999f)
+            {
+                posed++;
+                posedNames.Add(names is not null && bone < names.Count ? names[bone] : $"bone {bone}");
+            }
+        }
+
+        float rootTrace = pose.BoneCount > 0
+            ? pose.Rotations[0].M11 + pose.Rotations[0].M22 + pose.Rotations[0].M33 : 0f;
+        float lowerTrace = pose.BoneCount > 1
+            ? pose.Rotations[1].M11 + pose.Rotations[1].M22 + pose.Rotations[1].M33 : 0f;
+        string upper = animation.UpperBody is { } upperBody
+            ? $"'{upperBody.Clip?.Name ?? "none"}' t={upperBody.Time}" : "none";
+        string held = soldier.Weapon.Inventory?.Current?.WeaponType.FixedModel ?? "none";
+        _logger.Information(LogCategory,
+            $"Pose '{wanted.Model}': main '{animation.Main.Clip?.Name ?? "none"}' t={animation.Main.Time} noClip={animation.Main.IsNoClip}, " +
+            $"upper {upper}, state {animation.LastState}, upper-state {soldier.UpperBodyState}, held '{held}', " +
+            $"{pose.BoneCount} bones, {posed} posed [{string.Join(", ", posedNames)}], " +
+            $"root trace {rootTrace:F2}, lower-body trace {lowerTrace:F2}, skin current {SamePose(part.SkinnedPose, pose)}.");
+    }
 
     private static bool SamePose(BonePose? previous, BonePose current) => ReferenceEquals(previous, current)
         || (previous is not null
