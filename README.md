@@ -7,6 +7,12 @@
 ### **Native Android Engine Port (`ARM64` · `.NET 10` · `Vulkan 1.1` · `OpenAL Soft`)**
 
 <p>
+  <a href="https://github.com/rayishere0/Project-IGI-Android-Port/releases">
+    <img src="https://img.shields.io/badge/⬇️%20DOWNLOAD%20LATEST%20APK-GitHub%20Releases-00E676?style=for-the-badge&logo=android&logoColor=0B132B" alt="Download Latest Release APK" />
+  </a>
+</p>
+
+<p>
   <a href="https://github.com/rayishere0"><img src="https://img.shields.io/badge/Author-@rayishere0-181717?style=for-the-badge&logo=github" alt="Author" /></a>
   <img src="https://img.shields.io/badge/Platform-Android%207.0%2B%20(ARM64)-3DDC84?style=for-the-badge&logo=android&logoColor=white" alt="Platform" />
   <img src="https://img.shields.io/badge/Runtime-.NET%2010.0%20CoreCLR-512BD4?style=for-the-badge&logo=dotnet&logoColor=white" alt="Runtime" />
@@ -65,7 +71,7 @@
 > [!IMPORTANT]
 > **Copyright Compliance:** This repository and its compiled APK contain **no copyrighted game assets**. You must supply your own legal retail PC copy of *I.G.I. 2: Covert Strike* to play.
 
-1. **Install the APK** on an **ARM64** Android device running **Android 7.0 (Nougat)** or newer.
+1. **Download & Install the APK** from the [**Latest Releases**](https://github.com/rayishere0/Project-IGI-Android-Port/releases) page on an **ARM64** Android device running **Android 7.0 (Nougat)** or newer.
 2. **Transfer Your Game Data** from your PC installation to your phone's storage (e.g., `/sdcard/Download/IGI 2/`).
    - Ensure you copy the **`pc` directory** containing `igi2.exe` alongside the original game folders:
      ```text
