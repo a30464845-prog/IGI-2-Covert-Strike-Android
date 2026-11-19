@@ -103,5 +103,14 @@ public sealed class Igi2AnimationLibrary
                 : null;
     }
 
+    /// <summary>The key a rig is filed under: the hex of its child-count bytes.</summary>
+    /// <param name="rig">The rig.</param>
+    /// <returns>The key.</returns>
+    public static string RigKey(Igi2BoneHierarchy rig)
+    {
+        ArgumentNullException.ThrowIfNull(rig);
+        return Key(rig);
+    }
+
     private static string Key(Igi2BoneHierarchy rig) => Convert.ToHexString([.. rig.ChildCounts]);
 }

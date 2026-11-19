@@ -1,4 +1,5 @@
 using ProjectIGI.Game.Ai;
+using ProjectIGI.Game.Igi2.Ai;
 using ProjectIGI.Core.Diagnostics;
 using ProjectIGI.Core.Numerics;
 using ProjectIGI.Engine.Resources;
@@ -76,6 +77,9 @@ public sealed record Igi2LevelAiSetup(
 /// </summary>
 public static class Igi2LevelAi
 {
+    /// <summary>The log category for AI load diagnostics.</summary>
+    private const string LogCategory = "AI";
+
     /// <summary>
     /// Gives every graph node the room it stands in: <c>Graph_UpdateInternalDataAfterLoadHandler</c> (<c>igi2 h/2/graph.c</c>).
     /// </summary>
@@ -138,7 +142,22 @@ public static class Igi2LevelAi
         world.TaskById = id => byId.GetValueOrDefault(id);
         world.TaskPosition = id => PositionOf(byId.GetValueOrDefault(id));
         world.PatrolPath = id => byId.GetValueOrDefault(id) as Igi2PatrolPathTask;
-        world.EvaluateCommand = command => Igi2LineScript.Evaluate(command.Expression, setup.Natives, setup.Functions) != 0;
+        IProjectIGILogger log = setup.Logger ?? NullLogger.Instance;
+
+        // Patrol WaitForExpression texts that do not evaluate are silent by design: an unknown name reads 0 and an
+        // unparseable text reads 0, so a misspelled symbol holds its patrol forever with nothing in the log. Each
+        // distinct failing text is logged once per level, never per tick.
+        HashSet<string> reportedExpressions = new(StringComparer.Ordinal);
+        world.EvaluateCommand = command =>
+        {
+            int value = Igi2LineScript.Evaluate(command.Expression, setup.Natives, setup.Functions, out bool hasError);
+            if (hasError && reportedExpressions.Add(command.Expression))
+            {
+                log.Warning(LogCategory, $"Patrol expression did not evaluate: '{command.Expression}'.");
+            }
+
+            return value != 0;
+        };
         world.Doors = [.. setup.Root.Descendants().OfType<Interaction.Igi2DoorTask>()];
         world.NoiseAt = setup.NoiseAt ?? (static _ => 0f);
         if (setup.FireTaskTypes is { } fireTypes)
@@ -173,6 +192,22 @@ public static class Igi2LevelAi
         foreach (Igi2HumanAi mind in minds)
         {
             mind.AfterLoad(setup.Config?.Tweaks(mind.Task.AiType, setup.Difficulty));
+        }
+
+        // Diagnostics: a mind with no script has nothing to run, and a mind whose graph id names no graph has
+        // nowhere to walk; both are silent in the data, so they are logged once per level. A graph id of -1 means
+        // no graph was assigned at all, which is by design and is not logged.
+        foreach (Igi2HumanAi mind in minds)
+        {
+            if (mind.Script is null && mind.Task.Id != GameTask.NoId)
+            {
+                log.Warning(LogCategory, $"Soldier {mind.Task.Id} has no script '{Igi2HumanAiTask.ScriptNameFor(mind.Task.Id)}'.");
+            }
+
+            if (mind.Task.GraphId != -1 && mind.Graph is null)
+            {
+                log.Warning(LogCategory, $"Soldier {mind.Task.Id} has no graph {mind.Task.GraphId}.");
+            }
         }
 
         world.Current = null;

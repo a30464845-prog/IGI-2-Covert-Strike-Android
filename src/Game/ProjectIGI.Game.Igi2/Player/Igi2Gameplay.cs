@@ -1,3 +1,4 @@
+using ProjectIGI.Core.Diagnostics;
 using ProjectIGI.Core.Numerics;
 using ProjectIGI.Formats.Animation;
 using ProjectIGI.Game.Igi2.Animation;
@@ -39,6 +40,9 @@ public sealed class Igi2Gameplay : ITitleGameplay
     /// <summary>The model the first-person view falls back to, <c>005_01_1</c>.</summary>
     public const string FirstPersonFallbackModel = "005_01_1";
 
+    /// <summary>The log category for animation-library diagnostics.</summary>
+    private const string LogCategory = "Animation";
+
     /// <inheritdoc/>
     /// <remarks>config.c Config_Open; humanplayer.c HumanPlayer_StateSignalHandler: held crouch and the three stance edges are separate actions.</remarks>
     public IReadOnlyList<TitleInputBinding> InputBindings { get; } =
@@ -74,6 +78,11 @@ public sealed class Igi2Gameplay : ITitleGameplay
         Igi2HumanPlayerGeneral general = tuning?.General ?? Igi2HumanPlayerGeneral.Unset;
         ArgumentNullException.ThrowIfNull(request.World.Mission);
         Igi2AnimationLibrary clips = Igi2AnimationLibrary.Load(request.World.Mission.PacksInLoadOrder, request.World.Resources);
+        IProjectIGILogger log = request.World.Logger ?? NullLogger.Instance;
+
+        // Diagnostics: what the level's packs actually loaded. A soldier whose rig matches no clip renders in bind
+        // pose, and the library is otherwise silent about it; the counts say whether the library is thin at all.
+        log.Information(LogCategory, $"Animation library: {clips.RigCount} rig(s), {clips.ClipCount} clip(s).");
         Func<string, Formats.World.MefModel?> models = Models(request.World);
         Igi2BoneHierarchy? rig = models(spawn.Model)?.BoneHierarchy;
         string? armsModel = FirstPersonModel(models, PlayerSpawn.FindGameplayTask(request.World.LevelRoot) as Igi2HumanPlayerTask);
@@ -227,7 +236,8 @@ public sealed class Igi2Gameplay : ITitleGameplay
                 request.Natives,
                 request.Services.TryGet(out Scripting.Igi2ScriptFunctions? lineFunctions) ? lineFunctions : null,
                 worn,
-                player.Casings)
+                player.Casings,
+                log)
             : null;
 
         // The level's figures: each its face, its clips and its first pause, from the module's blink stream; then its weapon expression.
@@ -378,6 +388,7 @@ public sealed class Igi2Gameplay : ITitleGameplay
     /// <param name="functions">The natives those names may call.</param>
     /// <param name="worn">The model each soldier wears, its face given (<see cref="Igi2HumanFaces.Assign"/>).</param>
     /// <param name="casings">Where the soldiers' spent casings fly, or <see langword="null"/> for nowhere.</param>
+    /// <param name="logger">The logger for spawn diagnostics, or <see langword="null"/> for none.</param>
     /// <returns>The soldiers.</returns>
     /// <remarks>
     /// Every human's inventory is made within the ammunition limits (<c>Human_CreateHandler</c>, <c>igi2 0x4FDC90</c>) and filled by
@@ -399,7 +410,8 @@ public sealed class Igi2Gameplay : ITitleGameplay
         ProjectIGI.Scripting.Runtime.NativeRegistry? natives = null,
         Scripting.Igi2ScriptFunctions? functions = null,
         IReadOnlyDictionary<Engine.Tasks.GameTask, string>? worn = null,
-        Weapons.Igi2GunCasings? casings = null)
+        Weapons.Igi2GunCasings? casings = null,
+        IProjectIGILogger? logger = null)
     {
         ArgumentNullException.ThrowIfNull(root);
         ArgumentNullException.ThrowIfNull(services);
@@ -407,6 +419,7 @@ public sealed class Igi2Gameplay : ITitleGameplay
         ArgumentNullException.ThrowIfNull(models);
         ArgumentNullException.ThrowIfNull(sounds);
         ArgumentNullException.ThrowIfNull(random);
+        IProjectIGILogger log = logger ?? NullLogger.Instance;
         services.TryGet(out Igi2HumanWeapons? armoury);
         services.TryGet(out Igi2GameMaterials? materials);
         services.TryGet(out Igi2AnimTriggers? triggers);
@@ -427,6 +440,27 @@ public sealed class Igi2Gameplay : ITitleGameplay
 
                 IIgi2PlayerWeaponControl held = weapon;
                 Igi2HumanAnimation animation = new(clips, rig, Soldiers.Igi2SoldierStateAnimations.Table, () => held.BodyClips(rig));
+
+                // Diagnostics: whether this soldier's rig can play at all. A rig whose shape matches no clip leaves
+                // its controller clip-less, and the blend then writes the bind pose to every masked bone -- the
+                // T-pose. One line per soldier at spawn, never per frame; a miss is a warning so it is always recorded.
+                string model = worn is not null && worn.TryGetValue(task, out string? face) ? face : task.Model;
+                if (rig is not null)
+                {
+                    if (clips?.Find(rig, Igi2HumanAnimation.UnarmedClip) is not null)
+                    {
+                        log.Information(LogCategory, $"Soldier '{model}': rig {Igi2AnimationLibrary.RigKey(rig)} has stand clip.");
+                    }
+                    else
+                    {
+                        log.Warning(LogCategory, $"Soldier '{model}': rig {Igi2AnimationLibrary.RigKey(rig)} has no stand clip.");
+                    }
+                }
+                else
+                {
+                    log.Warning(LogCategory, $"Soldier '{model}': no rig (model did not resolve).");
+                }
+
                 return (surroundings, weapon, animation);
             },
             models,
