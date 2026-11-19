@@ -469,6 +469,34 @@ public sealed class Igi2Gameplay : ITitleGameplay
                     IReadOnlyList<string> names = Igi2BodyModel.From(model, mef).BoneNames;
                     log.Information(LogCategory, $"Soldier '{model}': {names.Count} bone name(s), center {Igi2BoneBranches.IndexOf(names, Igi2BoneBranches.CenterBone)}, lower body {Igi2BoneBranches.IndexOf(names, Igi2BoneBranches.LowerBodyBone)}.");
                 }
+                // Diagnostics: the ancestry that decides whether the level walk ever reaches this soldier's
+                // task. A task under a dormant ConditionalContainer (or a parent with no run handler) is drawn
+                // but never ticked, so its mind never runs and it keeps its bind pose -- the T-pose.
+                // One line per soldier at spawn, never per frame.
+                System.Text.StringBuilder chain = new();
+                for (Engine.Tasks.GameTask? at = task.Parent; at is not null; at = at.Parent)
+                {
+                    if (chain.Length != 0)
+                    {
+                        chain.Append(" / ");
+                    }
+
+                    if (at is ProjectIGI.Game.World.ConditionalContainerTask container)
+                    {
+                        chain.Append($"CC#{container.Id} run={container.IsRun} active={container.IsActive} cond='{container.Condition}'");
+                    }
+                    else if (at is ProjectIGI.Game.Ai.GuardGeneratorTask generator)
+                    {
+                        chain.Append($"Gen#{generator.Id} spawned={generator.IsSpawned}");
+                    }
+                    else
+                    {
+                        chain.Append($"{at.Type.Name}#{at.Id}");
+                    }
+                }
+
+                log.Information(LogCategory,
+                    $"Spawn '{model}' task {task.Id} at ({task.Position.X:F0}, {task.Position.Y:F0}, {task.Position.Z:F0}): {chain}.");
 
                 return (surroundings, weapon, animation);
             },
