@@ -139,6 +139,12 @@ public sealed class Igi2Soldiers
             if (animation is Igi2HumanAnimation layer)
             {
                 layer.SetBranches(look.BoneNames);
+
+                // A soldier under a dormant container is drawn but never ticked, so its mind never runs and
+                // its stand entry never plays: it keeps its bind pose -- the T-pose. Play the stand row once
+                // here, after the masks are ready and the weapon is in hand, so every soldier stands from
+                // birth; the mind's first tick re-plays the row when its container wakes.
+                layer.PlayState(Igi2SoldierState.Stand, 0, 0f);
             }
 
             soldier.Collider = new Igi2BoneCollider(soldier, soldier);
