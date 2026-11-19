@@ -1,17 +1,17 @@
 <div align="center">
 
-<!-- HERO BANNER (Replace with your own hosted banner or leave as the classic game cover art) -->
-<img src="https://upload.wikimedia.org/wikipedia/en/6/6b/IGI_2_Covert_Strike_Coverart.png" alt="I.G.I. 2: Covert Strike Cover Art" width="240" style="border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.4);" />
+<!-- HERO BANNER -->
+<img src="https://github.com/user-attachments/assets/2d0ab4f0-7633-4059-9043-d5f514aec07c" alt="I.G.I. 2: Covert Strike Cover Art" width="260" />
 
 # 🎯 I.G.I. 2: Covert Strike
 ### **Native Android Engine Port (`ARM64` · `.NET 10` · `Vulkan 1.1` · `OpenAL Soft`)**
 
 <p>
   <a href="https://github.com/rayishere0"><img src="https://img.shields.io/badge/Author-@rayishere0-181717?style=for-the-badge&logo=github" alt="Author" /></a>
-  <img width="619" height="495" alt="image" src="https://github.com/user-attachments/assets/2d0ab4f0-7633-4059-9043-d5f514aec07c" />
-  <img width="1600" height="1200" alt="image" src="https://github.com/user-attachments/assets/7d66cbf5-bcf4-4c42-9a0e-b3f16c4f9af4" />
-  <img width="600" height="338" alt="image" src="https://github.com/user-attachments/assets/492a7dec-3c93-413b-a56c-0db176361919" />
-  <img width="800" height="600" alt="image" src="https://github.com/user-attachments/assets/a80669ba-c432-4825-8b4f-bc6ae4abebbf" />
+  <img src="https://img.shields.io/badge/Platform-Android%207.0%2B%20(ARM64)-3DDC84?style=for-the-badge&logo=android&logoColor=white" alt="Platform" />
+  <img src="https://img.shields.io/badge/Runtime-.NET%2010.0%20CoreCLR-512BD4?style=for-the-badge&logo=dotnet&logoColor=white" alt="Runtime" />
+  <img src="https://img.shields.io/badge/Graphics-Vulkan%201.1-AC162C?style=for-the-badge&logo=vulkan&logoColor=white" alt="Graphics" />
+  <img src="https://img.shields.io/badge/Audio-OpenAL%20Soft%201.23.1-00599C?style=for-the-badge" alt="Audio" />
 </p>
 
 <p>
@@ -21,7 +21,8 @@
 
 ---
 
-[Quick Start](#-how-to-play-user-guide) •
+[Gameplay Showcase](#-gameplay-showcase) •
+[How to Play](#-how-to-play-user-guide) •
 [Features](#-key-features--build-highlights) •
 [Architecture](#-engine-architecture) •
 [Project Layout](#-repository-structure) •
@@ -40,26 +41,21 @@
   <table>
     <tr>
       <td align="center" width="50%">
-        <img src="https://cdn.mobygames.com/screenshots/12242343-igi-2-covert-strike-windows-in-game-thermal-goggles.jpg" alt="Tactical Stealth & Thermal Vision" width="100%" /><br/>
-        <sub><b>Tactical Stealth & Thermal Goggles</b> — Real-time shader & vision modes</sub>
+        <img src="https://github.com/user-attachments/assets/492a7dec-3c93-413b-a56c-0db176361919" alt="Gameplay Screenshot 1" width="100%" /><br/>
+        <sub><b>Tactical Combat & Stealth</b> — Native Vulkan 1.1 rendering</sub>
       </td>
       <td align="center" width="50%">
-        <img src="https://cdn.mobygames.com/screenshots/12242337-igi-2-covert-strike-windows-aiming-with-the-sniper-rifle.jpg" alt="Long-Range Sniper Ballistics" width="100%" /><br/>
-        <sub><b>Authentic Weapon Ballistics</b> — Bullet penetration & scoped precision</sub>
+        <img src="https://github.com/user-attachments/assets/7d66cbf5-bcf4-4c42-9a0e-b3f16c4f9af4" alt="Gameplay Screenshot 2" width="100%" /><br/>
+        <sub><b>Authentic Retail Visuals</b> — Baked lightmaps & weapon ballistics</sub>
       </td>
     </tr>
     <tr>
-      <td align="center" width="50%">
-        <img src="https://cdn.mobygames.com/screenshots/12242349-igi-2-covert-strike-windows-map-and-objectives-screen.jpg" alt="Tactical Map & Objectives" width="100%" /><br/>
-        <sub><b>Retail QVM Menu & Map</b> — Native bytecode execution of <code>mainmenu.qvm</code></sub>
-      </td>
-      <td align="center" width="50%">
-        <img src="https://cdn.mobygames.com/screenshots/12242340-igi-2-covert-strike-windows-infiltrating-the-base.jpg" alt="Base Infiltration" width="100%" /><br/>
-        <sub><b>Vulkan 1.1 Forward Renderer</b> — Baked lightmaps & 30 FPS battery pacing</sub>
+      <td align="center" colspan="2">
+        <img src="https://github.com/user-attachments/assets/a80669ba-c432-4825-8b4f-bc6ae4abebbf" alt="Gameplay Screenshot 3" width="65%" /><br/>
+        <sub><b>Full Campaign & QVM Interface</b> — All 19 missions running natively on ARM64</sub>
       </td>
     </tr>
   </table>
-  <p><sub><i>Note: Gameplay screenshots shown above reflect retail PC visuals rendered identically by the native engine. Replace with device screenshots in <code>docs/screenshots/</code> if desired.</i></sub></p>
 </div>
 
 <br/>
