@@ -10,6 +10,7 @@ using ProjectIGI.Game.Igi2.Weapons;
 using ProjectIGI.Game.Igi2.ViewModel;
 using ProjectIGI.Game.Igi2.World;
 using ProjectIGI.Game.Player;
+using ProjectIGI.Game.World;
 
 namespace ProjectIGI.Game.Igi2.Soldiers;
 
@@ -17,13 +18,15 @@ namespace ProjectIGI.Game.Igi2.Soldiers;
 public sealed class Igi2Soldiers
 {
     private readonly List<Igi2HumanSoldier> _bodies;
+    private readonly Dictionary<Igi2HumanSoldier, Igi2HumanSoldierTask> _tasks;
     private TitleWorldModel[] _drawn = [];
     private long _drawnTick = -1;
     private readonly List<(Igi2HumanSoldier Soldier, IReadOnlyList<TitleWorldModel> Parts)> _perBody = [];
 
-    private Igi2Soldiers(List<Igi2HumanSoldier> bodies)
+    private Igi2Soldiers(List<Igi2HumanSoldier> bodies, Dictionary<Igi2HumanSoldier, Igi2HumanSoldierTask> tasks)
     {
         _bodies = bodies;
+        _tasks = tasks;
     }
 
     /// <summary>Gets the bodies, in the order the level makes them.</summary>
@@ -40,7 +43,8 @@ public sealed class Igi2Soldiers
             _perBody.Clear();
             foreach (Igi2HumanSoldier body in _bodies)
             {
-                if (body.Model is { } model)
+                // A body out of the world (its container's condition failed, Human_RemoveDynCubeObjHandler) is not drawn.
+                if (body.IsActive && body.Model is { } model)
                 {
                     _perBody.Add((body, Igi2BodyFrame.Build(body, body.BodyPose(), model.Name, body.Weapon.Inventory?.Current?.WeaponType.FixedModel, tick, body.Weapon.Firing?.Flashes)));
                 }
@@ -65,6 +69,20 @@ public sealed class Igi2Soldiers
         }
 
         return drawn;
+    }
+
+    /// <summary>
+    /// Puts every soldier in the world or takes it out, as its own task's containers now stand: a soldier under a
+    /// container whose condition fails is out of the world -- not drawn, not struck, not heard -- as the original leaves it
+    /// until its container opens (<see cref="ConditionalContainerGate.IsTaskActive"/>). Read from the containers as they
+    /// stand, once a tick after the level has run, so a level put back from a save is right without being told.
+    /// </summary>
+    public void SyncPresence()
+    {
+        foreach ((Igi2HumanSoldier body, Igi2HumanSoldierTask task) in _tasks)
+        {
+            body.IsActive = ConditionalContainerGate.IsTaskActive(task);
+        }
     }
 
     /// <summary>
@@ -94,6 +112,7 @@ public sealed class Igi2Soldiers
         ArgumentNullException.ThrowIfNull(models);
         ArgumentNullException.ThrowIfNull(random);
         List<Igi2HumanSoldier> bodies = [];
+        Dictionary<Igi2HumanSoldier, Igi2HumanSoldierTask> tasks = [];
         Dictionary<string, Igi2BodyModel> looks = new(StringComparer.OrdinalIgnoreCase);
         Igi2DeathAnimCycle cycle = new();
         foreach (Igi2HumanSoldierTask task in levelRoot.Descendants().OfType<Igi2HumanSoldierTask>())
@@ -144,9 +163,10 @@ public sealed class Igi2Soldiers
             soldier.Collider = new Igi2BoneCollider(soldier, soldier);
             task.Body = soldier;
             bodies.Add(soldier);
+            tasks[soldier] = task;
         }
 
-        return new Igi2Soldiers(bodies);
+        return new Igi2Soldiers(bodies, tasks);
     }
 
     /// <summary>
