@@ -95,7 +95,8 @@ public sealed partial class Igi2TitlePlayer : ITitlePlayer, ITitleFirstPerson, I
         {
             if (_decalsTick != _ticks)
             {
-                IEnumerable<Humans.Igi2Human> bodies = Soldiers?.Bodies ?? [];
+                // A soldier out of the world casts no shadow: its container not running, it is not there to be seen.
+                IEnumerable<Humans.Igi2Human> bodies = Soldiers?.Bodies.Where(static h => h.IsActive) ?? [];
                 _decals = [.. bodies.Prepend(Human).Select(static h => Decal(h.Shadow)).OfType<TitleGroundDecal>()];
                 _decalsTick = _ticks;
             }
@@ -578,6 +579,10 @@ public sealed partial class Igi2TitlePlayer : ITitlePlayer, ITitleFirstPerson, I
         {
             Flow?.IsBreakKeyDown = input.BreakCutscene;
             level.Tick();
+
+            // A soldier under a container whose condition fails is out of the world until it opens. The walk has run, so
+            // the containers stand as this tick left them; settle the bodies now, before the frame draws them.
+            Soldiers?.SyncPresence();
 
             // The glass container is the level's last child, made as the first pane was: its panes' glass tick follows the level's.
             Glass.Run();

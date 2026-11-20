@@ -160,11 +160,16 @@ public sealed partial class Igi2HumanSoldier : IIgi2WeaponHitTarget, IIgi2Explos
     /// <param name="hit">The blast.</param>
     /// <remarks>
     /// The soldier's size for the blast is a third of its model's radius and its root's distance from its origin, the root as the
-    /// animation last left it. A kill counts to the blast's owner. Not yet: the soldier's <c>isActive</c> (<c>Human+0x4A5</c>), taken
-    /// as set.
+    /// animation last left it. A kill counts to the blast's owner. A soldier out of the world (<c>Human+0x4A5</c> unset) takes none.
     /// </remarks>
     public void ExplosionHit(in Igi2ExplosionHit hit)
     {
+        // A soldier out of the world takes no blast: its container not running, it is not there to be struck.
+        if (!IsActive)
+        {
+            return;
+        }
+
         if (Mind is { IsInvulnerable: true } || (hit.Owner is Igi2Human && hit.Team == Team))
         {
             return;
