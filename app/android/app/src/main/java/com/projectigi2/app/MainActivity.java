@@ -264,10 +264,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         cardLayout.setGravity(Gravity.CENTER_HORIZONTAL);
         cardLayout.setPadding((int)(32 * density), (int)(24 * density), (int)(32 * density), (int)(24 * density));
 
-        // Dark tactical translucent background with green border
+        // Dark tactical translucent background with blue border
         GradientDrawable cardBg = new GradientDrawable();
-        cardBg.setColor(Color.argb(225, 10, 16, 30)); // Translucent dark green
-        cardBg.setStroke((int)(2 * density), Color.rgb(80, 160, 255)); // Phosphor green
+        cardBg.setColor(Color.argb(225, 10, 16, 30)); // Translucent dark blue
+        cardBg.setStroke((int)(2 * density), Color.rgb(80, 160, 255)); // Tactical blue
         cardBg.setCornerRadius(10 * density);
         cardLayout.setBackground(cardBg);
 
@@ -288,14 +288,14 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         // Subtitle
         TextView subtitleText = new TextView(this);
         subtitleText.setTextColor(Color.rgb(170, 195, 225));
-        subtitleText.setTextSize(11);
+        subtitleText.setTextSize(12);
         subtitleText.setTypeface(Typeface.MONOSPACE);
         subtitleText.setGravity(Gravity.CENTER);
         subtitleText.setPadding(0, (int)(4 * density), 0, (int)(16 * density));
         subtitleText.setText("AUTHENTIC GAME FILES REQUIRED");
         cardLayout.addView(subtitleText);
 
-        // Glowing progress bar
+        // Progress bar
         progressBar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
         progressBar.setIndeterminate(true);
         progressBar.setProgressTintList(ColorStateList.valueOf(Color.rgb(80, 160, 255)));
@@ -321,7 +321,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         // Renderer selector: the backend the engine starts on (Vulkan or WebGPU)
         TextView rendererLabel = new TextView(this);
         rendererLabel.setTextColor(Color.rgb(170, 195, 225));
-        rendererLabel.setTextSize(10);
+        rendererLabel.setTextSize(12);
         rendererLabel.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
         rendererLabel.setGravity(Gravity.CENTER);
         rendererLabel.setLetterSpacing(0.12f);
@@ -339,20 +339,20 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
 
         vulkanBtn = new Button(this);
         vulkanBtn.setText("VULKAN");
-        vulkanBtn.setTextSize(11);
+        vulkanBtn.setTextSize(12);
         vulkanBtn.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
         LinearLayout.LayoutParams vulkanLp = new LinearLayout.LayoutParams(
-            (int)(160 * density), (int)(40 * density));
+            (int)(160 * density), (int)(48 * density));
         vulkanLp.rightMargin = (int)(12 * density);
         vulkanBtn.setOnClickListener(v -> setRendererBackend("vulkan"));
         rendererRow.addView(vulkanBtn, vulkanLp);
 
         webGpuBtn = new Button(this);
         webGpuBtn.setText("WEBGPU");
-        webGpuBtn.setTextSize(11);
+        webGpuBtn.setTextSize(12);
         webGpuBtn.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
         LinearLayout.LayoutParams webGpuLp = new LinearLayout.LayoutParams(
-            (int)(160 * density), (int)(40 * density));
+            (int)(160 * density), (int)(48 * density));
         webGpuBtn.setOnClickListener(v -> setRendererBackend("webgpu"));
         rendererRow.addView(webGpuBtn, webGpuLp);
 
@@ -366,7 +366,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         // 1. Select Game Folder Button
         selectFolderBtn = new Button(this);
         selectFolderBtn.setText("SELECT GAME FOLDER");
-        selectFolderBtn.setTextSize(11);
+        selectFolderBtn.setTextSize(12);
         selectFolderBtn.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
         selectFolderBtn.setTextColor(Color.WHITE);
 
@@ -377,7 +377,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         selectFolderBtn.setBackground(selectBg);
 
         LinearLayout.LayoutParams selectLp = new LinearLayout.LayoutParams(
-            (int)(220 * density), (int)(44 * density));
+            (int)(220 * density), (int)(48 * density));
         selectLp.rightMargin = (int)(12 * density);
         selectFolderBtn.setOnClickListener(v -> openGameFolderPicker());
         btnRow.addView(selectFolderBtn, selectLp);
@@ -389,7 +389,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         playBtn.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
 
         LinearLayout.LayoutParams playLp = new LinearLayout.LayoutParams(
-            (int)(160 * density), (int)(44 * density));
+            (int)(160 * density), (int)(48 * density));
         playBtn.setOnClickListener(v -> onPlayButtonClicked());
         btnRow.addView(playBtn, playLp);
 
@@ -444,13 +444,13 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
             playBg.setCornerRadius(6 * density);
 
             if (enabled) {
-                playBg.setColor(Color.rgb(80, 160, 255)); // Phosphor green
+                playBg.setColor(Color.rgb(80, 160, 255)); // Tactical blue
                 playBg.setStroke((int)(2 * density), Color.rgb(190, 215, 255));
                 playBtn.setTextColor(Color.BLACK);
             } else {
                 playBg.setColor(Color.rgb(38, 44, 56)); // Disabled dark grey
                 playBg.setStroke((int)(1 * density), Color.rgb(65, 75, 95));
-                playBtn.setTextColor(Color.rgb(100, 115, 140));
+                playBtn.setTextColor(Color.rgb(150, 165, 190));
             }
             playBtn.setBackground(playBg);
         });
@@ -474,13 +474,13 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         GradientDrawable bg = new GradientDrawable();
         bg.setCornerRadius(6 * density);
         if (selected) {
-            bg.setColor(Color.rgb(80, 160, 255)); // Phosphor green
+            bg.setColor(Color.rgb(80, 160, 255)); // Tactical blue
             bg.setStroke((int)(2 * density), Color.rgb(190, 215, 255));
             btn.setTextColor(Color.BLACK);
         } else {
-            bg.setColor(Color.rgb(20, 35, 60)); // Dark green
+            bg.setColor(Color.rgb(20, 35, 60)); // Dark blue
             bg.setStroke((int)(1 * density), Color.rgb(65, 80, 68));
-            btn.setTextColor(Color.rgb(100, 120, 105));
+            btn.setTextColor(Color.rgb(150, 175, 190));
         }
         btn.setBackground(bg);
     }
@@ -1693,7 +1693,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         close.setTextColor(Color.rgb(190, 215, 255));
         close.setTextSize(18);
         close.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
-        close.setPadding((int)(12 * density), 0, 0, 0);
+        close.setPadding((int)(12 * density), (int)(12 * density), (int)(12 * density), (int)(12 * density));
+        close.setMinimumWidth((int)(48 * density));
+        close.setMinimumHeight((int)(48 * density));
         close.setOnClickListener(v -> {
             if (socialsDialog != null) socialsDialog.dismiss();
         });
