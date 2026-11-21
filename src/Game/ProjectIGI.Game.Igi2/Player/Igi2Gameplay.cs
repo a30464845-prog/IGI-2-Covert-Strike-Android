@@ -111,6 +111,27 @@ public sealed class Igi2Gameplay : ITitleGameplay
 
         // The panes of glass the buildings hang, each made as the level's objects are, drawing its threshold from the run stream.
         player.Glass = Interaction.Igi2GlassContainer.Build(world, models, player.Human.Random, explosions: null);
+
+        // A pane that breaks shatters where it was struck: the host draws its shards from the pane's own collision faces
+        // (GlassShatter_CreateShards), and the pane's placement is the one the task that placed it hung at that place, as
+        // the glass container finds a gone pane. Nothing subscribed to the break before, so the strike's sound was all a
+        // breaking pane ever did.
+        if (request.Services.TryGet(out Hosting.IBlastEffectsHost? blastHost))
+        {
+            WorldScene scene = request.Built.Scene;
+            foreach (Interaction.Igi2Glass pane in player.Glass.Panes)
+            {
+                pane.Shattered += shatter =>
+                {
+                    if (shatter.Glass.Solid.Owner is Collision.Igi2CollisionOwner owner
+                        && FindPlacement(scene, owner.LevelId, shatter.Glass.Solid.Position) is { } placement)
+                    {
+                        blastHost.GlassShatter(placement, shatter.Point);
+                    }
+                };
+            }
+        }
+
         if (weapons is not null)
         {
             weapons.Effects = new Igi2LevelWeaponEffects(sounds, () => player.Human.View.Position, LevelAi(request.Services), player.EjectCasing);
@@ -777,5 +798,24 @@ public sealed class Igi2Gameplay : ITitleGameplay
         ArgumentNullException.ThrowIfNull(world.Mission);
         List<Formats.World.MtpPack> mtp = [.. world.Mission.PacksInLoadOrder.Select(static pack => pack.Pack)];
         return Igi2DrawableScene.Models(Igi2ModelTable.Create(mtp), world.Mission.PacksInLoadOrder);
+    }
+
+    /// <summary>Finds the placement a broken pane hangs as, by the task that placed it and where it stands.</summary>
+    /// <remarks>Same one-unit tolerance the glass container finds a gone pane by.</remarks>
+    private static WorldPlacement? FindPlacement(WorldScene scene, int levelId, Vector3d positionUnits)
+    {
+        foreach (WorldPlacement placement in scene.Placements)
+        {
+            Vector3d at = WorldScene.ToUnits(placement.Position);
+            if (placement.LevelId == levelId
+                && Math.Abs(at.X - positionUnits.X) < 1.0
+                && Math.Abs(at.Y - positionUnits.Y) < 1.0
+                && Math.Abs(at.Z - positionUnits.Z) < 1.0)
+            {
+                return placement;
+            }
+        }
+
+        return null;
     }
 }
