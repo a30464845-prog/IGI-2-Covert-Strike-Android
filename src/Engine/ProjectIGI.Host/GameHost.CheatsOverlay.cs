@@ -15,6 +15,61 @@ public sealed partial class GameHost
 {
     private bool _cheatsModalOpen;
 
+    // The main-menu strip: one labelled 48 dp row per entry, top-right, in place of
+    // the old tiny icon column. 48 dp is 56 units here: the overlay scale is
+    // clamp(height / 480, 1, 3), so at 1080p-high one unit is 2.25 px and
+    // 48 dp is 126 px. A row is tappable across its whole rect — no invisible
+    // hit-area extension is needed any more.
+    private enum MenuStripAction
+    {
+        Cheats,
+        Benchmark,
+        Settings,
+        Console,
+        Keyboard,
+    }
+
+    private readonly record struct MenuStripRow(MenuStripAction Action, UiRect Rect);
+
+    private static MenuStripRow[] MenuStripRows(float width, float scale)
+    {
+        // 160 units wide: glyph + label with room to spare, and narrow enough to
+        // stay mostly in the margin right of the retail menu (the old 28-unit
+        // icons lived there entirely; a labelled row cannot, so the strip's
+        // left edge may sit over menu art — see the screenshot ask in the report).
+        const float rowW = 160f;
+        const float rowH = 56f;
+        const float gap = 8f;
+        const float margin = 12f;
+        MenuStripAction[] actions =
+        [
+            MenuStripAction.Cheats,
+            MenuStripAction.Benchmark,
+            MenuStripAction.Settings,
+            MenuStripAction.Console,
+            MenuStripAction.Keyboard,
+        ];
+        var rows = new MenuStripRow[actions.Length];
+        for (int i = 0; i < actions.Length; i++)
+        {
+            float x = width - (rowW * scale) - (margin * scale);
+            float y = (margin * scale) + (i * (rowH + gap) * scale);
+            rows[i] = new MenuStripRow(actions[i], new UiRect(x, y, rowW * scale, rowH * scale));
+        }
+
+        return rows;
+    }
+
+    private static string MenuStripLabel(MenuStripAction action) => action switch
+    {
+        MenuStripAction.Cheats => "CHEATS",
+        MenuStripAction.Benchmark => "BENCHMARK",
+        MenuStripAction.Settings => "SETTINGS",
+        MenuStripAction.Console => "CONSOLE",
+        MenuStripAction.Keyboard => "KEYBOARD",
+        _ => string.Empty,
+    };
+
     private void UpdateCheatsOverlay(FrameLoopState state)
     {
         // Active strictly on the main menu landing screen
@@ -25,8 +80,8 @@ public sealed partial class GameHost
             return;
         }
 
-        // While a benchmark is running the menu is hidden and the gear is not drawn; the modal
-        // cannot open under the drone view, and the keyboard toggle stays put too. The
+        // While a benchmark is running the menu is hidden and the strip is not drawn; the modal
+        // cannot open under the drone view, and the console toggle stays put too. The
         // first-run prompt is the same: its own buttons own the taps until it is answered.
         if (BenchmarkRunning || _benchmarkPromptUp)
         {
@@ -37,10 +92,6 @@ public sealed partial class GameHost
         float width = SafeWindowWidth;
         float height = SafeWindowHeight;
         float scale = Math.Clamp(height / 480f, 1f, 3f);
-        float gearW = 20f * scale;
-        float gearH = 20f * scale;
-        float gearX = width - gearW - (12f * scale);
-        float gearY = 12f * scale;
 
         InputState input = _window.Input;
         bool click = false;
@@ -71,57 +122,75 @@ public sealed partial class GameHost
 
         if (!_cheatsModalOpen)
         {
-            // The gear itself is small (20 units), but a fingertip is not: give it a
-            // generous invisible hit area so big fingers can open the cheats modal.
-            float hit = 48f * scale;
-            float hitX = gearX + (gearW * 0.5f) - (hit * 0.5f);
-            float hitY = gearY + (gearH * 0.5f) - (hit * 0.5f);
-            if (click && clickX >= hitX && clickX <= hitX + hit && clickY >= hitY && clickY <= hitY + hit)
+            if (!click)
             {
-                _cheatsModalOpen = true;
-                // Suppress click so menu beneath does not click Play/Exit
-                input.Mouse.SetButton(MouseButton.Left, down: false);
+                return;
             }
 
-            // Settings icon just under the gear: taps open the pause menu's
-            // configuration screen over the retail menu, so settings can be changed
-            // before a mission starts. Same generous hit area as the gear. (The icon
-            // is 28 units, centred on the gear; see DrawCheatsOverlay.)
-            float stW = 28f * scale;
-            float stH = 28f * scale;
-            float stX = gearX + ((gearW - stW) * 0.5f);
-            float stY = gearY + gearH + (8f * scale);
-            float stHitX = stX + (stW * 0.5f) - (hit * 0.5f);
-            float stHitY = stY + (stH * 0.5f) - (hit * 0.5f);
-            if (click && clickX >= stHitX && clickX <= stHitX + hit && clickY >= stHitY && clickY <= stHitY + hit)
+            // The labelled strip: each row is a full 48 dp target, so the row rect
+            // itself is the hit area.
+            foreach (MenuStripRow row in MenuStripRows(width, scale))
             {
-                if (state.Shell is { } shell)
+                if (!row.Rect.Contains(clickX, clickY))
                 {
-                    // Menu mode is what lets the shell update and draw over the retail
-                    // menu; the retail menu's own tasks see idle input while it is set
-                    // (UpdateShell marks the frame captured), so the menu underneath
-                    // cannot react to taps on the settings.
-                    shell.OpenSettingsFromMainMenu();
-                    _menuFlow.MenuMode = true;
-                    input.Mouse.SetButton(MouseButton.Left, down: false);
+                    continue;
                 }
+
+                switch (row.Action)
+                {
+                    case MenuStripAction.Cheats:
+                        _cheatsModalOpen = true;
+                        break;
+
+                    // Benchmark has its own entry point now, out of the cheats modal:
+                    // this row starts the run over the Weather Station. Inert while a
+                    // run is already going (the strip is hidden during one anyway).
+                    case MenuStripAction.Benchmark:
+                        if (!BenchmarkRunning)
+                        {
+                            StartBenchmark(state, manual: true);
+                        }
+
+                        break;
+
+                    // Settings: taps open the pause menu's configuration screen over
+                    // the retail menu, so settings can be changed before a mission
+                    // starts.
+                    case MenuStripAction.Settings:
+                        if (state.Shell is { } shell)
+                        {
+                            // Menu mode is what lets the shell update and draw over the retail
+                            // menu; the retail menu's own tasks see idle input while it is set
+                            // (UpdateShell marks the frame captured), so the menu underneath
+                            // cannot react to taps on the settings.
+                            shell.OpenSettingsFromMainMenu();
+                            _menuFlow.MenuMode = true;
+                        }
+
+                        break;
+
+                    // Console: taps toggle the developer console (the same open state
+                    // the Grave key flips). The soft keyboard follows the console:
+                    // opening it summons the IME for typing commands, closing it
+                    // dismisses the keyboard again.
+                    case MenuStripAction.Console:
+                        state.Console.Model.IsOpen = !state.Console.Model.IsOpen;
+                        KeyboardRequested = state.Console.Model.IsOpen;
+                        break;
+
+                    // Keyboard: taps toggle the soft keyboard so the player can type
+                    // names and other menu text even when the automatic focus
+                    // detection does not fire.
+                    case MenuStripAction.Keyboard:
+                        KeyboardRequested = !KeyboardRequested;
+                        break;
+                }
+
+                // Suppress click so the menu beneath does not click Play/Exit
+                input.Mouse.SetButton(MouseButton.Left, down: false);
+                return;
             }
 
-            // Keyboard icon just under the settings icon: taps toggle the soft keyboard
-            // so the player can type names and other menu text even when the automatic
-            // focus detection does not fire. Same generous hit area as the gear.
-            // (The icon is 28 units, centred on the gear; see DrawCheatsOverlay.)
-            float kbW = 28f * scale;
-            float kbH = 28f * scale;
-            float kbX = gearX + ((gearW - kbW) * 0.5f);
-            float kbY = stY + stH + (8f * scale);
-            float kbHitX = kbX + (kbW * 0.5f) - (hit * 0.5f);
-            float kbHitY = kbY + (kbH * 0.5f) - (hit * 0.5f);
-            if (click && clickX >= kbHitX && clickX <= kbHitX + hit && clickY >= kbHitY && clickY <= kbHitY + hit)
-            {
-                KeyboardRequested = !KeyboardRequested;
-                input.Mouse.SetButton(MouseButton.Left, down: false);
-            }
             return;
         }
 
@@ -145,15 +214,34 @@ public sealed partial class GameHost
             return;
         }
 
-        float contentY = modalY + (56f * scale);
+        // Close (X) in the title bar: a full 48 dp square.
+        float barH = 56f * scale;
+        float closeXSize = 56f * scale;
+        UiRect closeXRect = new(modalX + modalW - closeXSize, modalY, closeXSize, barH);
+        if (closeXRect.Contains(clickX, clickY))
+        {
+            _cheatsModalOpen = false;
+            return;
+        }
+
+        float contentY = modalY + barH + (12f * scale);
         float rowHeight = 62f * scale;
-        float btnW = 110f * scale;
-        float btnH = 40f * scale;
-        float btnX = modalX + modalW - btnW - (20f * scale);
+
+        // Each cheat row is tappable across its whole width, not just on its
+        // toggle button: the row rect is the hit area, the button is the state.
+        bool ToggleRow(float rowY)
+        {
+            if (clickX >= modalX && clickX <= modalX + modalW && clickY >= rowY && clickY <= rowY + rowHeight)
+            {
+                return true;
+            }
+
+            return false;
+        }
 
         // Row 0: Infinite Health
         float r0Y = contentY;
-        if (clickX >= btnX && clickX <= btnX + btnW && clickY >= r0Y && clickY <= r0Y + btnH)
+        if (ToggleRow(r0Y))
         {
             PlayerCheatCVars.InfiniteHealth.Value = !PlayerCheatCVars.InfiniteHealth.Value;
             state.Console.SaveSettings();
@@ -163,7 +251,7 @@ public sealed partial class GameHost
 
         // Row 1: Infinite Ammo
         float r1Y = contentY + rowHeight;
-        if (clickX >= btnX && clickX <= btnX + btnW && clickY >= r1Y && clickY <= r1Y + btnH)
+        if (ToggleRow(r1Y))
         {
             PlayerCheatCVars.InfiniteAmmo.Value = !PlayerCheatCVars.InfiniteAmmo.Value;
             state.Console.SaveSettings();
@@ -173,7 +261,7 @@ public sealed partial class GameHost
 
         // Row 2: All Weapons
         float r2Y = contentY + (rowHeight * 2f);
-        if (clickX >= btnX && clickX <= btnX + btnW && clickY >= r2Y && clickY <= r2Y + btnH)
+        if (ToggleRow(r2Y))
         {
             PlayerCheatCVars.AllWeapons.Value = !PlayerCheatCVars.AllWeapons.Value;
             state.Console.SaveSettings();
@@ -183,7 +271,7 @@ public sealed partial class GameHost
 
         // Row 3: Unlock All Missions
         float r3Y = contentY + (rowHeight * 3f);
-        if (clickX >= btnX && clickX <= btnX + btnW && clickY >= r3Y && clickY <= r3Y + btnH)
+        if (ToggleRow(r3Y))
         {
             PlayerCheatCVars.UnlockAllLevels.Value = !PlayerCheatCVars.UnlockAllLevels.Value;
             state.Console.SaveSettings();
@@ -191,23 +279,9 @@ public sealed partial class GameHost
             return;
         }
 
-        // Row 4: Benchmark -- an action, not a toggle: it closes the modal and starts the
-        // run over the Weather Station. Inert while a run is already going.
-        float r4Y = contentY + (rowHeight * 4f);
-        if (clickX >= btnX && clickX <= btnX + btnW && clickY >= r4Y && clickY <= r4Y + btnH)
-        {
-            if (!BenchmarkRunning)
-            {
-                _cheatsModalOpen = false;
-                StartBenchmark(state, manual: true);
-            }
-
-            return;
-        }
-
         // Close button at bottom
         float closeW = 220f * scale;
-        float closeH = 42f * scale;
+        float closeH = 56f * scale;
         float closeX = modalX + ((modalW - closeW) * 0.5f);
         float closeY = modalY + modalH - closeH - (14f * scale);
         if (clickX >= closeX && clickX <= closeX + closeW && clickY >= closeY && clickY <= closeY + closeH)
@@ -224,8 +298,8 @@ public sealed partial class GameHost
             return;
         }
 
-        // The gear and the keyboard icon stay off the drone view while a run is going, and
-        // off the first-run prompt while it asks.
+        // The strip stays off the drone view while a run is going, and off the
+        // first-run prompt while it asks.
         if (BenchmarkRunning || _benchmarkPromptUp)
         {
             return;
@@ -236,10 +310,6 @@ public sealed partial class GameHost
         float width = SafeWindowWidth;
         float height = SafeWindowHeight;
         float scale = Math.Clamp(height / 480f, 1f, 3f);
-        float gearW = 20f * scale;
-        float gearH = 20f * scale;
-        float gearX = width - gearW - (12f * scale);
-        float gearY = 12f * scale;
 
         _device.BeginStageTiming(RenderStage.UserInterface);
         _device.Set2DProjection(SafeWindowWidth, SafeWindowHeight);
@@ -247,90 +317,112 @@ public sealed partial class GameHost
 
         var painter = UiPainter.Create(state.Batch, new LayoutContext(SafeWindowWidth, SafeWindowHeight));
 
-        Bgra32 brightGreen = Bgra32.FromRgb(80, 160, 255);
-        Bgra32 darkBg = Bgra32.FromRgba(10, 20, 38, 235);
+        Bgra32 accent = Bgra32.FromRgb(80, 160, 255);
+        Bgra32 panel = Bgra32.FromRgb(8, 16, 30);
+        Bgra32 textPrimary = Bgra32.FromRgb(235, 242, 250);
+        Bgra32 textSecondary = Bgra32.FromRgb(150, 175, 190);
+        Bgra32 darkOnAccent = Bgra32.FromRgb(10, 20, 38);
 
-        // ── 1. Top-Right Tiny Gear Icon Button ──────────────────────────────
-        painter.FillRect(new UiRect(gearX, gearY, gearW, gearH), darkBg);
-        painter.StrokeRect(new UiRect(gearX, gearY, gearW, gearH), 1.5f * scale, brightGreen);
-
-        // Geometric Gear Icon centered in button
-        float gCenterX = gearX + (gearW * 0.5f);
-        float gCenterY = gearY + (gearH * 0.5f);
-        float gRadius = 4f * scale;
-
-        // Gear teeth (8 teeth)
-        float toothW = 2f * scale;
-        float toothL = 2.5f * scale;
-        painter.FillRect(new UiRect(gCenterX - (toothW * 0.5f), gCenterY - gRadius - toothL, toothW, toothL), brightGreen);
-        painter.FillRect(new UiRect(gCenterX - (toothW * 0.5f), gCenterY + gRadius, toothW, toothL), brightGreen);
-        painter.FillRect(new UiRect(gCenterX - gRadius - toothL, gCenterY - (toothW * 0.5f), toothL, toothW), brightGreen);
-        painter.FillRect(new UiRect(gCenterX + gRadius, gCenterY - (toothW * 0.5f), toothL, toothW), brightGreen);
-        // Diagonal teeth
-        float diag = gRadius * 0.707f;
-        painter.FillRect(new UiRect(gCenterX + diag - (toothW * 0.5f), gCenterY - diag - (toothW * 0.5f), toothW, toothW), brightGreen);
-        painter.FillRect(new UiRect(gCenterX - diag - (toothW * 0.5f), gCenterY - diag - (toothW * 0.5f), toothW, toothW), brightGreen);
-        painter.FillRect(new UiRect(gCenterX + diag - (toothW * 0.5f), gCenterY + diag - (toothW * 0.5f), toothW, toothW), brightGreen);
-        painter.FillRect(new UiRect(gCenterX - diag - (toothW * 0.5f), gCenterY + diag - (toothW * 0.5f), toothW, toothW), brightGreen);
-
-        // Gear Hub & axle hole
-        painter.FillRect(new UiRect(gCenterX - gRadius, gCenterY - gRadius, gRadius * 2f, gRadius * 2f), brightGreen);
-        painter.FillRect(new UiRect(gCenterX - (gRadius * 0.4f), gCenterY - (gRadius * 0.4f), gRadius * 0.8f, gRadius * 0.8f), darkBg);
-
-        // ── 1b. Settings icon just under the gear ───────────────────────────
-        // Three slider tracks with a knob on each: the settings glyph, in the same
-        // 28-unit box as the gear. Tapping it opens the configuration
-        // screen over the retail menu (see UpdateCheatsOverlay).
-        float stW = 28f * scale;
-        float stH = 28f * scale;
-        float stX = gearX + ((gearW - stW) * 0.5f);
-        float stY = gearY + gearH + (8f * scale);
-        painter.FillRect(new UiRect(stX, stY, stW, stH), Bgra32.FromRgba(18, 32, 60, 245));
-        painter.StrokeRect(new UiRect(stX, stY, stW, stH), 2f * scale, brightGreen);
-        float trackX = stX + (5f * scale);
-        float trackW = 18f * scale;
-        float trackH = 2f * scale;
-        float knob = 5f * scale;
-        float[] trackY = [stY + (7f * scale), stY + (13f * scale), stY + (19f * scale)];
-        float[] knobX = [stX + (8f * scale), stX + (15f * scale), stX + (11f * scale)];
-        for (int i = 0; i < 3; i++)
+        // ── 1. Main-menu strip: labelled 48 dp rows, top-right ──────────────
+        // One row per entry, glyph + label, opaque dark with the accent hairline.
+        // The console and keyboard rows fill accent while their state is on.
+        foreach (MenuStripRow row in MenuStripRows(width, scale))
         {
-            painter.FillRect(new UiRect(trackX, trackY[i], trackW, trackH), brightGreen);
-            painter.FillRect(new UiRect(knobX[i], trackY[i] - (1.5f * scale), knob, knob), brightGreen);
-        }
+            bool highlighted = row.Action switch
+            {
+                MenuStripAction.Console => state.Console.IsOpen,
+                MenuStripAction.Keyboard => KeyboardRequested,
+                _ => false,
+            };
+            Bgra32 fill = highlighted ? accent : panel;
+            Bgra32 glyphColor = highlighted ? darkOnAccent : accent;
+            Bgra32 labelColor = highlighted ? darkOnAccent : textPrimary;
 
-        // ── 1c. Keyboard icon just under the settings icon ───────────────────
-        // Tapping it toggles the soft keyboard so player names and other menu text
-        // can be typed even when the automatic focus detection does not fire.
-        // It is drawn highlighted while the keyboard is requested. It is deliberately
-        // bigger and brighter than the gear (28 units, lighter green fill) so it
-        // cannot be missed against the dark menu background.
-        float kbW = 28f * scale;
-        float kbH = 28f * scale;
-        float kbX = gearX + ((gearW - kbW) * 0.5f);
-        float kbY = stY + stH + (8f * scale);
-        painter.FillRect(new UiRect(kbX, kbY, kbW, kbH), KeyboardRequested ? brightGreen : Bgra32.FromRgba(18, 32, 60, 245));
-        painter.StrokeRect(new UiRect(kbX, kbY, kbW, kbH), 2f * scale, brightGreen);
-        // Two rows of keys and a spacebar. Dark keys when highlighted, bright green otherwise.
-        Bgra32 keyColor = KeyboardRequested ? Bgra32.FromRgb(10, 20, 38) : brightGreen;
-        float key = 3f * scale;
-        float keyGap = 2f * scale;
-        float keysW = (4f * key) + (3f * keyGap);
-        float keysX = kbX + ((kbW - keysW) * 0.5f);
-        float row1Y = kbY + (5.5f * scale);
-        for (int i = 0; i < 4; i++)
-        {
-            painter.FillRect(new UiRect(keysX + (i * (key + keyGap)), row1Y, key, key), keyColor);
+            painter.FillRect(row.Rect, fill);
+            painter.StrokeRect(row.Rect, 1.5f * scale, accent);
+
+            // Glyph box: 28 units, left of the row.
+            float gx = row.Rect.X + (14f * scale);
+            float gy = row.Rect.Y + (14f * scale);
+            float gs = scale;
+            switch (row.Action)
+            {
+                case MenuStripAction.Cheats:
+                    DrawGearGlyph(painter, gx + (14f * gs), gy + (14f * gs), 7f * gs, glyphColor, fill);
+                    break;
+
+                case MenuStripAction.Benchmark:
+                    // Three ascending bars: the benchmark glyph.
+                    float barW = 5f * gs;
+                    float barBase = gy + (24f * gs);
+                    painter.FillRect(new UiRect(gx + (4f * gs), barBase - (8f * gs), barW, 8f * gs), glyphColor);
+                    painter.FillRect(new UiRect(gx + (11.5f * gs), barBase - (14f * gs), barW, 14f * gs), glyphColor);
+                    painter.FillRect(new UiRect(gx + (19f * gs), barBase - (20f * gs), barW, 20f * gs), glyphColor);
+                    break;
+
+                case MenuStripAction.Settings:
+                    // Three slider tracks with a knob on each.
+                    float trackX = gx + (5f * gs);
+                    float trackW = 18f * gs;
+                    float trackH = 2f * gs;
+                    float knob = 5f * gs;
+                    float[] trackY = [gy + (7f * gs), gy + (13f * gs), gy + (19f * gs)];
+                    float[] knobX = [gx + (8f * gs), gx + (15f * gs), gx + (11f * gs)];
+                    for (int i = 0; i < 3; i++)
+                    {
+                        painter.FillRect(new UiRect(trackX, trackY[i], trackW, trackH), glyphColor);
+                        painter.FillRect(new UiRect(knobX[i], trackY[i] - (1.5f * gs), knob, knob), glyphColor);
+                    }
+
+                    break;
+
+                case MenuStripAction.Console:
+                    // Console prompt glyph ">_", centred in the glyph box.
+                    if (_shellType is { } consoleType)
+                    {
+                        const string prompt = ">_";
+                        float promptSize = 16f * gs;
+                        UiVec2 promptExtent = consoleType.Mono.Measure(prompt, promptSize);
+                        painter.DrawText(consoleType.Mono, prompt,
+                            new UiVec2(gx + ((28f * gs - promptExtent.X) * 0.5f), gy + ((28f * gs - promptExtent.Y) * 0.5f)),
+                            promptSize, glyphColor);
+                    }
+
+                    break;
+
+                case MenuStripAction.Keyboard:
+                    // Two rows of keys and a spacebar.
+                    float key = 3f * gs;
+                    float keyGap = 2f * gs;
+                    float keysW = (4f * key) + (3f * keyGap);
+                    float keysX = gx + ((28f * gs - keysW) * 0.5f);
+                    float row1Y = gy + (5.5f * gs);
+                    for (int i = 0; i < 4; i++)
+                    {
+                        painter.FillRect(new UiRect(keysX + (i * (key + keyGap)), row1Y, key, key), glyphColor);
+                    }
+
+                    float row2Y = row1Y + key + keyGap;
+                    for (int i = 0; i < 4; i++)
+                    {
+                        painter.FillRect(new UiRect(keysX + (i * (key + keyGap)), row2Y, key, key), glyphColor);
+                    }
+
+                    float spaceW = keysW * 0.6f;
+                    float spaceX = gx + ((28f * gs - spaceW) * 0.5f);
+                    float spaceY = row2Y + key + keyGap;
+                    painter.FillRect(new UiRect(spaceX, spaceY, spaceW, key), glyphColor);
+                    break;
+            }
+
+            if (_shellType is { } labelType)
+            {
+                string label = MenuStripLabel(row.Action);
+                painter.DrawText(labelType.Heading, label,
+                    new UiVec2(row.Rect.X + (50f * scale), row.Rect.Y + (21f * scale)),
+                    14f * scale, labelColor);
+            }
         }
-        float row2Y = row1Y + key + keyGap;
-        for (int i = 0; i < 4; i++)
-        {
-            painter.FillRect(new UiRect(keysX + (i * (key + keyGap)), row2Y, key, key), keyColor);
-        }
-        float spaceW = keysW * 0.6f;
-        float spaceX = kbX + ((kbW - spaceW) * 0.5f);
-        float spaceY = row2Y + key + keyGap;
-        painter.FillRect(new UiRect(spaceX, spaceY, spaceW, key), keyColor);
 
         // ── 2. Cheats Modal Overlay ───────────────────────────────────────
         if (_cheatsModalOpen)
@@ -343,24 +435,32 @@ public sealed partial class GameHost
             float modalX = (width - modalW) * 0.5f;
             float modalY = (height - modalH) * 0.5f;
 
-            // Main modal box
-            painter.FillRect(new UiRect(modalX, modalY, modalW, modalH), Bgra32.FromRgba(8, 14, 28, 252));
-            painter.StrokeRect(new UiRect(modalX, modalY, modalW, modalH), 2f * scale, brightGreen);
+            // Main modal box: opaque dark, accent hairline.
+            painter.FillRect(new UiRect(modalX, modalY, modalW, modalH), panel);
+            painter.StrokeRect(new UiRect(modalX, modalY, modalW, modalH), 1.5f * scale, accent);
 
             // Modal Title Bar
-            float barH = 46f * scale;
-            painter.FillRect(new UiRect(modalX, modalY, modalW, barH), Bgra32.FromRgba(18, 32, 60, 240));
-            painter.FillRect(new UiRect(modalX, modalY + barH, modalW, 1.5f * scale), brightGreen);
+            float barH = 56f * scale;
+            painter.FillRect(new UiRect(modalX, modalY, modalW, barH), Bgra32.FromRgb(18, 32, 60));
+            painter.FillRect(new UiRect(modalX, modalY + barH, modalW, 1.5f * scale), accent);
 
             if (_shellType is { } type)
             {
-                painter.DrawText(type.Heading, "CHEATS", new UiVec2(modalX + (20f * scale), modalY + (13f * scale)), 17f * scale, brightGreen);
+                painter.DrawText(type.Heading, "CHEATS", new UiVec2(modalX + (20f * scale), modalY + (19f * scale)), 17f * scale, accent);
+
+                // Close (X) in the title bar, a full 48 dp square.
+                const string closeGlyph = "X";
+                UiVec2 closeExtent = type.Heading.Measure(closeGlyph, 20f * scale);
+                painter.DrawText(type.Heading, closeGlyph,
+                    new UiVec2(modalX + modalW - (56f * scale) + ((56f * scale - closeExtent.X) * 0.5f),
+                        modalY + ((barH - closeExtent.Y) * 0.5f)),
+                    20f * scale, accent);
             }
 
             float contentY = modalY + barH + (12f * scale);
             float rowHeight = 62f * scale;
             float btnW = 110f * scale;
-            float btnH = 40f * scale;
+            float btnH = 56f * scale;
             float btnX = modalX + modalW - btnW - (20f * scale);
 
             void DrawCheatRow(int index, string title, string subtitle, bool active, string activeText = "ON", string inactiveText = "OFF")
@@ -370,28 +470,32 @@ public sealed partial class GameHost
 
                 if (_shellType is { } tp)
                 {
-                    painter.DrawText(tp.Heading, title, new UiVec2(textX, rowY + (4f * scale)), 15f * scale, Bgra32.White);
-                    painter.DrawText(tp.Mono, subtitle, new UiVec2(textX, rowY + (25f * scale)), 11f * scale, Bgra32.FromRgb(150, 180, 220));
+                    painter.DrawText(tp.Heading, title, new UiVec2(textX, rowY + (4f * scale)), 15f * scale, textPrimary);
+                    painter.DrawText(tp.Mono, subtitle, new UiVec2(textX, rowY + (25f * scale)), 11f * scale, textSecondary);
                 }
 
-                UiRect bRect = new(btnX, rowY + (4f * scale), btnW, btnH);
+                // The toggle button is 48 dp tall, centred in its row; the whole
+                // row is the tap target (see UpdateCheatsOverlay).
+                float btnY = rowY + ((rowHeight - btnH) * 0.5f);
+                UiRect bRect = new(btnX, btnY, btnW, btnH);
+                string buttonText = active ? $"[ {activeText} ]" : $"[ {inactiveText} ]";
                 if (active)
                 {
                     painter.FillRect(bRect, Bgra32.FromRgb(60, 130, 220));
                     painter.StrokeRect(bRect, 1.5f * scale, Bgra32.FromRgb(140, 200, 255));
-                    if (_shellType is { } tpAct)
-                    {
-                        painter.DrawText(tpAct.Mono, $"[ {activeText} ]", new UiVec2(btnX + (26f * scale), rowY + (13f * scale)), 14f * scale, Bgra32.White);
-                    }
                 }
                 else
                 {
-                    painter.FillRect(bRect, Bgra32.FromRgba(25, 32, 50, 200));
+                    painter.FillRect(bRect, Bgra32.FromRgb(25, 32, 50));
                     painter.StrokeRect(bRect, 1f * scale, Bgra32.FromRgb(70, 100, 140));
-                    if (_shellType is { } tpInact)
-                    {
-                        painter.DrawText(tpInact.Mono, $"[ {inactiveText} ]", new UiVec2(btnX + (23f * scale), rowY + (13f * scale)), 14f * scale, Bgra32.FromRgb(140, 165, 200));
-                    }
+                }
+
+                if (_shellType is { } tpBtn)
+                {
+                    UiVec2 btnExtent = tpBtn.Mono.Measure(buttonText, 14f * scale);
+                    painter.DrawText(tpBtn.Mono, buttonText,
+                        new UiVec2(btnX + ((btnW - btnExtent.X) * 0.5f), btnY + ((btnH - btnExtent.Y) * 0.5f)),
+                        14f * scale, active ? textPrimary : Bgra32.FromRgb(140, 165, 200));
                 }
             }
 
@@ -399,29 +503,65 @@ public sealed partial class GameHost
             DrawCheatRow(1, "INFINITE AMMUNITION", "Magazines stay filled, reserves never deplete while firing", PlayerCheatCVars.InfiniteAmmo.Value);
             DrawCheatRow(2, "ALL WEAPONS", "Adds all weapons into inventory for the mission", PlayerCheatCVars.AllWeapons.Value);
             DrawCheatRow(3, "UNLOCK ALL MISSIONS", $"All {_missions.InProgressionOrder().Count()} missions are selectable in Campaign", PlayerCheatCVars.UnlockAllLevels.Value);
+
             // The last finished run, when there is one, is the proof it ran: date, tier picked
             // and per-tier 1% low FPS, from r_benchmark_last. A run that was skipped writes
-            // nothing there, so the row keeps the last finished run's line.
-            string benchmarkBlurb = BenchmarkCVars.LastRun.Value.Length > 0
-                ? $"Last run: {BenchmarkCVars.LastRun.Value}"
-                : "Measure High, Medium and Low over the Weather Station; keep the best that holds 30 FPS";
-            DrawCheatRow(4, "BENCHMARK", benchmarkBlurb, BenchmarkRunning, "RUNNING", "RUN");
+            // nothing there, so the line keeps the last finished run's record. The benchmark
+            // itself no longer lives in this modal: run it from the BENCHMARK row on the
+            // main-menu strip.
+            if (_shellType is { } tpFoot)
+            {
+                string lastRun = BenchmarkCVars.LastRun.Value.Length > 0
+                    ? $"LAST BENCHMARK: {BenchmarkCVars.LastRun.Value}"
+                    : "NO BENCHMARK RUN YET - START ONE FROM THE BENCHMARK BUTTON.";
+                painter.DrawText(tpFoot.Mono, lastRun,
+                    new UiVec2(modalX + (20f * scale), modalY + (322f * scale)),
+                    11f * scale, textSecondary);
+            }
 
             // Close button
             float closeW = 220f * scale;
-            float closeH = 42f * scale;
+            float closeH = 56f * scale;
             float closeX = modalX + ((modalW - closeW) * 0.5f);
             float closeY = modalY + modalH - closeH - (14f * scale);
             UiRect cRect = new(closeX, closeY, closeW, closeH);
-            painter.FillRect(cRect, Bgra32.FromRgba(18, 32, 60, 230));
-            painter.StrokeRect(cRect, 1.5f * scale, brightGreen);
+            painter.FillRect(cRect, Bgra32.FromRgb(18, 32, 60));
+            painter.StrokeRect(cRect, 1.5f * scale, accent);
             if (_shellType is { } tpClose)
             {
-                painter.DrawText(tpClose.Heading, "[ CLOSE ]", new UiVec2(closeX + (68f * scale), closeY + (11f * scale)), 15f * scale, brightGreen);
+                const string closeText = "[ CLOSE ]";
+                UiVec2 closeTextExtent = tpClose.Heading.Measure(closeText, 15f * scale);
+                painter.DrawText(tpClose.Heading, closeText,
+                    new UiVec2(closeX + ((closeW - closeTextExtent.X) * 0.5f), closeY + ((closeH - closeTextExtent.Y) * 0.5f)),
+                    15f * scale, accent);
             }
         }
 
         state.Batch.End();
         _device.EndStageTiming();
+    }
+
+    // Geometric gear glyph: 8 teeth, hub and axle hole, centred on (centerX, centerY).
+    private static void DrawGearGlyph(UiPainter painter, float centerX, float centerY, float radius, Bgra32 color, Bgra32 holeColor)
+    {
+        float toothW = radius * 0.45f;
+        float toothL = radius * 0.6f;
+        float diag = radius * 0.707f;
+        float halfTooth = toothW * 0.5f;
+
+        // Straight teeth
+        painter.FillRect(new UiRect(centerX - halfTooth, centerY - radius - toothL, toothW, toothL), color);
+        painter.FillRect(new UiRect(centerX - halfTooth, centerY + radius, toothW, toothL), color);
+        painter.FillRect(new UiRect(centerX - radius - toothL, centerY - halfTooth, toothL, toothW), color);
+        painter.FillRect(new UiRect(centerX + radius, centerY - halfTooth, toothL, toothW), color);
+        // Diagonal teeth
+        painter.FillRect(new UiRect(centerX + diag - halfTooth, centerY - diag - halfTooth, toothW, toothW), color);
+        painter.FillRect(new UiRect(centerX - diag - halfTooth, centerY - diag - halfTooth, toothW, toothW), color);
+        painter.FillRect(new UiRect(centerX + diag - halfTooth, centerY + diag - halfTooth, toothW, toothW), color);
+        painter.FillRect(new UiRect(centerX - diag - halfTooth, centerY + diag - halfTooth, toothW, toothW), color);
+
+        // Gear Hub & axle hole
+        painter.FillRect(new UiRect(centerX - radius, centerY - radius, radius * 2f, radius * 2f), color);
+        painter.FillRect(new UiRect(centerX - (radius * 0.4f), centerY - (radius * 0.4f), radius * 0.8f, radius * 0.8f), holeColor);
     }
 }
