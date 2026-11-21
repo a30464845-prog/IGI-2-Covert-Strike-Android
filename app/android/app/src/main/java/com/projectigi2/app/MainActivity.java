@@ -47,6 +47,7 @@ import android.view.WindowInsetsController;
 import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.FrameLayout;
+import android.widget.ImageButton;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
@@ -122,29 +123,24 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
     private Handler imeHandler;
     private Runnable imePoller;
     private boolean imeShown = false;
-    // Footer row (bottom of the screen, on the file-picker screen and the retail
-    // main menu): three labelled buttons — SOCIALS, LOAD GAME, GITHUB — in one
-    // row, all 48 dp tall. Native Views, not a managed overlay: the retail menu
-    // is drawn from menu data, and there is no managed-to-Java channel to fire
-    // an ACTION_VIEW intent from C#. Visibility rule (updateFooterVisibility):
-    // the row shows on the picker and on the main menu; SOCIALS always shows
-    // with it; LOAD GAME only on the main menu except the credits screen;
-    // GITHUB only on the credits screen. LOAD GAME and GITHUB never show together.
-    private LinearLayout footerLayout;
-    private boolean footerShown = false;
-    // Socials: labelled SOCIALS button opening a popup with Discord + Reddit links.
-    private Button socialsButton;
+    // Socials: a small button in the top-left corner of the file-picker screen and
+    // the main menu, opening a popup with Discord + Reddit links. A native View, not
+    // a managed overlay: the retail menu is drawn from menu data, and there is no
+    // managed-to-Java channel to fire an ACTION_VIEW intent from C#.
+    private ImageButton socialsButton;
     private AlertDialog socialsDialog;
     private boolean socialsButtonShown = false;
     private static final String DISCORD_URL = "https://discord.gg/hSyz7KWZrg";
     private static final String REDDIT_URL = "https://www.reddit.com/user/project_igi_porter";
-    // GitHub: labelled GITHUB button on the retail credits screen only, opening
-    // the port's repo (the credits text itself names the full URL).
+    // GitHub: a small button in the bottom-left corner of the retail credits screen only,
+    // opening the port's repo. Same native-View reasoning as the socials button above.
     private Button githubButton;
     private boolean githubButtonShown = false;
     private static final String GITHUB_URL = "https://github.com/rayishere0/IGI-2-Covert-Strike-Android";
-    // Load Game: labelled LOAD GAME button on the retail main menu only, opening
-    // the managed load view.
+    // Load Game: a small button in the bottom-left corner of the retail main menu only,
+    // opening the managed load view. Same native-View reasoning as the socials button above,
+    // and the same corner as the GitHub button — the two are never shown together, the
+    // GitHub button only on the credits screen and this one everywhere else on the menu.
     private Button loadGameButton;
     private boolean loadGameButtonShown = false;
     // True while this Activity is in the foreground. The quit watcher uses it to tell a Quit
@@ -282,10 +278,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         FrameLayout.LayoutParams cardParams = new FrameLayout.LayoutParams(
             (int)(cardWidthDp * density), FrameLayout.LayoutParams.WRAP_CONTENT);
         cardParams.gravity = Gravity.CENTER;
-        // Reserve the 60 dp footer strip (48 dp buttons + 12 dp bottom margin)
-        // so the centred card never slides under it on short landscape screens
-        // (360 dp high: ~288 dp card + 60 dp footer = ~348 dp).
-        cardParams.bottomMargin = (int)(60 * density);
 
         // Title
         TextView titleText = new TextView(this);
@@ -422,10 +414,17 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         rootLayout.addView(splashLayout, new FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
 
-        // Footer row (SOCIALS / LOAD GAME / GITHUB): bottom of the screen, above
-        // the picker card and the game surface alike, so one row serves both
-        // screens. Its visibility is polled below.
-        setupFooter();
+        // Socials button: top-left, above the picker card and the game surface alike,
+        // so one button serves both screens. Its visibility is polled below.
+        setupSocialsButton();
+
+        // GitHub button: bottom-left, shown only while the retail credits screen is up.
+        // Its visibility is polled below, next to the socials button's.
+        setupGithubButton();
+
+        // Load Game button: bottom-left, shown on the main menu except the credits screen.
+        // Its visibility is polled below, next to the socials and GitHub buttons'.
+        setupLoadGameButton();
 
         setContentView(rootLayout);
 
@@ -1430,17 +1429,15 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
 
         // Polls whether the game has a text field focused and shows/hides the IME.
         // The game tells us via nativeIsTextFieldFocused(); the IME needs a focused View,
-        // which is the hidden EditText above. The same tick drives the footer row:
-        // the menu state lives only in the native engine and is only readable by
-        // polling nativeIsMainMenu()/nativeIsCreditsScreen() — NativeEngine exposes
-        // no callback into Java, so there is no event to listen for. See
-        // updateFooterVisibility() for the full reasoning.
+        // which is the hidden EditText above.
         imeHandler = new Handler(Looper.getMainLooper());
         imePoller = new Runnable() {
             @Override
             public void run() {
                 updateImeVisibility();
-                updateFooterVisibility();
+                updateSocialsButtonVisibility();
+                updateGithubButtonVisibility();
+                updateLoadGameButtonVisibility();
                 if (imeHandler != null) {
                     imeHandler.postDelayed(this, 250);
                 }
@@ -1515,48 +1512,136 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         }
     }
 
-    private Button makeFooterButton(String text, float density) {
-        Button button = new Button(this);
-        button.setText(text);
-        button.setTextSize(12);
-        button.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
-        button.setTextColor(Color.rgb(190, 215, 255));
-        button.setGravity(Gravity.CENTER);
-        button.setMinimumHeight((int)(48 * density));
-        button.setPadding(
-                (int)(16 * density), (int)(12 * density), (int)(16 * density), (int)(12 * density));
+    private void setupSocialsButton() {
+        float density = getResources().getDisplayMetrics().density;
+        int size = (int)(48 * density);
+        socialsButton = new ImageButton(this);
+        socialsButton.setImageResource(android.R.drawable.ic_menu_share);
+        socialsButton.setColorFilter(Color.rgb(190, 215, 255));
+        socialsButton.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+        socialsButton.setPadding((int)(10 * density), (int)(10 * density), (int)(10 * density), (int)(10 * density));
+        socialsButton.setContentDescription("Socials");
+
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(Color.rgb(20, 35, 60));
+        bg.setStroke((int)(1.5f * density), Color.rgb(80, 160, 255));
+        bg.setCornerRadius(8 * density);
+        socialsButton.setBackground(bg);
+
+        // The main-menu logo fills roughly the top quarter of the screen (see the
+        // reference menu screenshot), so the button sits just below it, in the empty
+        // left column — top-left as asked, without covering the logo.
+        int topMargin = (int)(getResources().getDisplayMetrics().heightPixels * 0.28);
+        FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(size, size);
+        params.gravity = Gravity.TOP | Gravity.START;
+        params.topMargin = topMargin;
+        params.leftMargin = (int)(12 * density);
+        socialsButton.setOnClickListener(v -> showSocialsPopup());
+        rootLayout.addView(socialsButton, params);
+        socialsButton.setVisibility(View.VISIBLE);
+        socialsButtonShown = true;
+    }
+
+    private void updateSocialsButtonVisibility() {
+        if (socialsButton == null) {
+            return;
+        }
+        // On the file-picker screen while the splash is up; on the main menu once the
+        // game is running (MenuMode, no pause, no mission). Hidden in-mission, while
+        // loading, on the pause menu, and everywhere else.
+        boolean show = splashLayout == null || splashLayout.getVisibility() == View.VISIBLE;
+        if (!show && isGameStarted) {
+            try {
+                show = NativeEngine.nativeIsMainMenu();
+            } catch (Throwable ignored) {
+                // Native library not loaded yet: stay hidden until the game is up.
+                show = false;
+            }
+        }
+        if (show != socialsButtonShown) {
+            socialsButtonShown = show;
+            socialsButton.setVisibility(show ? View.VISIBLE : View.GONE);
+        }
+    }
+
+    private void setupGithubButton() {
+        float density = getResources().getDisplayMetrics().density;
+        githubButton = new Button(this);
+        githubButton.setText("GITHUB\nIGI-2-Covert-Strike-Android");
+        githubButton.setTextSize(12);
+        githubButton.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
+        githubButton.setTextColor(Color.rgb(190, 215, 255));
+        githubButton.setGravity(Gravity.CENTER);
+        githubButton.setMinimumHeight((int)(48 * density));
         GradientDrawable bg = new GradientDrawable();
         bg.setColor(Color.rgb(20, 35, 60));
         bg.setStroke((int)(1.5f * density), Color.rgb(80, 160, 255));
         bg.setCornerRadius(6 * density);
-        button.setBackground(bg);
-        return button;
+        githubButton.setBackground(bg);
+        githubButton.setPadding(
+                (int)(16 * density), (int)(8 * density), (int)(16 * density), (int)(8 * density));
+
+        // Bottom-left: the credits screen's OK button sits bottom-right, and the credits
+        // frame ends above here, so the button clears both. The credits text itself names
+        // the URL; this is the tap target that opens it.
+        FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT);
+        params.gravity = Gravity.BOTTOM | Gravity.START;
+        params.bottomMargin = (int)(16 * density);
+        params.leftMargin = (int)(12 * density);
+        githubButton.setOnClickListener(v -> openSocialUrl(GITHUB_URL));
+        rootLayout.addView(githubButton, params);
+        githubButton.setVisibility(View.GONE);
+        githubButtonShown = false;
     }
 
-    private void setupFooter() {
+    private void updateGithubButtonVisibility() {
+        if (githubButton == null) {
+            return;
+        }
+        // Only while the retail credits screen is up (MenuMode, no pause, no mission,
+        // active menu screen 916). Hidden on every other screen, in-mission, and while
+        // loading — same polling rhythm as the socials button above.
+        boolean show = false;
+        if (isGameStarted) {
+            try {
+                show = NativeEngine.nativeIsCreditsScreen();
+            } catch (Throwable ignored) {
+                // Native library not loaded yet: stay hidden until the game is up.
+                show = false;
+            }
+        }
+        if (show != githubButtonShown) {
+            githubButtonShown = show;
+            githubButton.setVisibility(show ? View.VISIBLE : View.GONE);
+        }
+    }
+
+    private void setupLoadGameButton() {
         float density = getResources().getDisplayMetrics().density;
-        footerLayout = new LinearLayout(this);
-        footerLayout.setOrientation(LinearLayout.HORIZONTAL);
-        footerLayout.setGravity(Gravity.CENTER);
-        FrameLayout.LayoutParams footerParams = new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT);
-        footerParams.gravity = Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL;
-        footerParams.bottomMargin = (int)(12 * density);
-        footerParams.leftMargin = (int)(12 * density);
-        footerParams.rightMargin = (int)(12 * density);
+        loadGameButton = new Button(this);
+        loadGameButton.setText("LOAD GAME");
+        loadGameButton.setTextSize(12);
+        loadGameButton.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
+        loadGameButton.setTextColor(Color.rgb(190, 215, 255));
+        loadGameButton.setGravity(Gravity.CENTER);
+        loadGameButton.setMinimumHeight((int)(48 * density));
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(Color.rgb(20, 35, 60));
+        bg.setStroke((int)(1.5f * density), Color.rgb(80, 160, 255));
+        bg.setCornerRadius(6 * density);
+        loadGameButton.setBackground(bg);
+        loadGameButton.setPadding(
+                (int)(16 * density), (int)(8 * density), (int)(16 * density), (int)(8 * density));
 
-        // SOCIALS: labelled text button — no icon. There is no socials drawable
-        // in res/ (no drawable folder at all) and this file set owns no new
-        // asset, so the label is the button; same style as its neighbours.
-        socialsButton = makeFooterButton("SOCIALS", density);
-        socialsButton.setContentDescription("Socials");
-        socialsButton.setOnClickListener(v -> showSocialsPopup());
-        LinearLayout.LayoutParams socialsLp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        socialsLp.rightMargin = (int)(8 * density);
-        footerLayout.addView(socialsButton, socialsLp);
-
-        loadGameButton = makeFooterButton("LOAD GAME", density);
+        // Bottom-left, in the GitHub button's style and place: the credits screen's OK button sits
+        // bottom-right, and the centred retail list sits clear of this corner. The GitHub button owns
+        // this corner on the credits screen, so this one stays hidden there.
+        FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT);
+        params.gravity = Gravity.BOTTOM | Gravity.START;
+        params.bottomMargin = (int)(16 * density);
+        params.leftMargin = (int)(12 * density);
         loadGameButton.setOnClickListener(v -> {
             try {
                 NativeEngine.nativeOpenLoadGame();
@@ -1564,75 +1649,30 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
                 // Native library not loaded yet: nothing to open.
             }
         });
-        LinearLayout.LayoutParams loadLp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        loadLp.rightMargin = (int)(8 * density);
-        footerLayout.addView(loadGameButton, loadLp);
-
-        // GITHUB: short label only — the credits text itself names the full URL.
-        githubButton = makeFooterButton("GITHUB", density);
-        githubButton.setOnClickListener(v -> openSocialUrl(GITHUB_URL));
-        footerLayout.addView(githubButton, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
-
-        rootLayout.addView(footerLayout, footerParams);
-        footerLayout.setVisibility(View.GONE);
-        footerShown = false;
-        socialsButtonShown = false;
+        rootLayout.addView(loadGameButton, params);
+        loadGameButton.setVisibility(View.GONE);
         loadGameButtonShown = false;
-        githubButtonShown = false;
     }
 
-    private void updateFooterVisibility() {
-        if (footerLayout == null) {
+    private void updateLoadGameButtonVisibility() {
+        if (loadGameButton == null) {
             return;
         }
-        // One rule for the whole row, evaluated on the 250 ms poll tick:
-        // the row shows on the file-picker screen (splash up) and on the
-        // retail main menu; SOCIALS always shows with it; LOAD GAME only on
-        // the main menu except the credits screen; GITHUB only on the credits
-        // screen. Hidden in-mission, on pause, while loading, and on every
-        // other retail sub-screen.
-        //
-        // Why still a poll, not an event: the menu state lives only in the
-        // native engine, and NativeEngine exposes it solely as pull-only JNI
-        // queries (nativeIsMainMenu, nativeIsCreditsScreen) with no callback
-        // into Java. An event-driven update would need a new native-to-Java
-        // callback through the C# engine — a native/C# change outside this
-        // Java-only remake, unprovable here. The same 250 ms tick already
-        // polls the IME state for the same reason, so the footer rides it
-        // instead of adding a second timer. Each view only flips on change,
-        // so a steady state costs no layout work.
-        boolean onSplash = splashLayout == null || splashLayout.getVisibility() == View.VISIBLE;
-        boolean onMenu = false;
-        boolean onCredits = false;
+        // Only on the main menu, and never on the credits screen, where the GitHub button owns the
+        // same bottom-left corner. Hidden in-mission, on pause, while loading, and on every retail
+        // sub-screen — same polling rhythm as the socials button above.
+        boolean show = false;
         if (isGameStarted) {
             try {
-                onMenu = NativeEngine.nativeIsMainMenu();
-                onCredits = NativeEngine.nativeIsCreditsScreen();
+                show = NativeEngine.nativeIsMainMenu() && !NativeEngine.nativeIsCreditsScreen();
             } catch (Throwable ignored) {
                 // Native library not loaded yet: stay hidden until the game is up.
+                show = false;
             }
         }
-        boolean showFooter = onSplash || onMenu;
-        boolean showSocials = showFooter;
-        boolean showLoadGame = onMenu && !onCredits;
-        boolean showGithub = onCredits;
-        if (showFooter != footerShown) {
-            footerShown = showFooter;
-            footerLayout.setVisibility(showFooter ? View.VISIBLE : View.GONE);
-        }
-        if (showSocials != socialsButtonShown) {
-            socialsButtonShown = showSocials;
-            socialsButton.setVisibility(showSocials ? View.VISIBLE : View.GONE);
-        }
-        if (showLoadGame != loadGameButtonShown) {
-            loadGameButtonShown = showLoadGame;
-            loadGameButton.setVisibility(showLoadGame ? View.VISIBLE : View.GONE);
-        }
-        if (showGithub != githubButtonShown) {
-            githubButtonShown = showGithub;
-            githubButton.setVisibility(showGithub ? View.VISIBLE : View.GONE);
+        if (show != loadGameButtonShown) {
+            loadGameButtonShown = show;
+            loadGameButton.setVisibility(show ? View.VISIBLE : View.GONE);
         }
     }
 
