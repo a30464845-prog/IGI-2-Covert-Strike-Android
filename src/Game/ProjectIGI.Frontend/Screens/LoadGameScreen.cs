@@ -25,11 +25,8 @@ namespace ProjectIGI.Frontend.Screens;
 public sealed class LoadGameScreen : ShellScreen
 {
     private readonly Dictionary<int, UiImage> _thumbnails = [];
+    private readonly DragScrollHelper _dragScroll = new();
     private ScrollView? _scroll;
-    private UiVec2? _touchDragStart;
-    private float _touchDragStartOffset;
-    private bool _isDragging;
-    private Control? _pendingTapTarget;
     private Label? _message;
 
     /// <summary>Initializes a new instance of the <see cref="LoadGameScreen"/> class.</summary>
@@ -43,12 +40,17 @@ public sealed class LoadGameScreen : ShellScreen
     protected override ShellTab Tab => ShellTab.Home;
 
     /// <inheritdoc/>
-    protected override IReadOnlyList<KeyHint> Hints => [new("ENTER", "Load"), new("ESC", "Back")];
-
-    /// <inheritdoc/>
     protected override UiElement? BuildContent(LayoutContext context)
     {
         UiTheme theme = Context.Theme;
+
+        var root = new Canvas();
+
+        // Back, top-left: back to the shell home page.
+        root.Add(
+            ShellBackButton.MenuBack(theme, () => Context.Stack.Reset(new MainMenuScreen(Context))),
+            new Anchor(UiVec2.Zero, new UiVec2(0.30f, 0.12f), new Thickness(24f, 24f, 0f, 0f)));
+
         var column = new StackPanel
         {
             Orientation = Orientation.Vertical,
@@ -64,6 +66,12 @@ public sealed class LoadGameScreen : ShellScreen
             TitleSize = 88f,
             EyebrowColor = theme.Accent,
             Margin = new Thickness(0f, 0f, 0f, 20f),
+        });
+
+        // The touch instruction, on the screen: tap a save to load it.
+        column.AddChild(new Label(theme.Body, "Tap a save to load it.", 17f, theme.TextMuted)
+        {
+            Margin = new Thickness(0f, 0f, 0f, 4f),
         });
 
         _scroll = new ScrollView(theme)
@@ -89,7 +97,8 @@ public sealed class LoadGameScreen : ShellScreen
         if (saves.Count == 0)
         {
             _message.Text = "No save games yet.";
-            return column;
+            root.Add(column, Anchor.Fill);
+            return root;
         }
 
         foreach (LoadGameSave save in saves)
@@ -106,7 +115,8 @@ public sealed class LoadGameScreen : ShellScreen
             rows.AddChild(tile);
         }
 
-        return column;
+        root.Add(column, Anchor.Fill);
+        return root;
     }
 
     /// <inheritdoc/>
@@ -119,52 +129,10 @@ public sealed class LoadGameScreen : ShellScreen
             return false;
         }
 
-        // Drag to scroll the list, mirroring the settings screen: a drag scrolls, a tap still activates the row under the pointer.
-        if (_scroll is not null)
+        // Drag to scroll the list: a drag scrolls, a tap still loads the save under the pointer.
+        if (_dragScroll.HandleInput(_scroll, Focus, input))
         {
-            var pointer = new UiVec2(input.Mouse.X, input.Mouse.Y);
-            bool insideScroll = _scroll.Bounds.Contains(pointer);
-
-            if (input.Mouse.WasPressed(MouseButton.Left))
-            {
-                if (insideScroll && !_scroll.IsOverScrollbar(pointer))
-                {
-                    _touchDragStart = pointer;
-                    _touchDragStartOffset = _scroll.ScrollOffset;
-                    _isDragging = false;
-                    _pendingTapTarget = Focus?.FocusAt(pointer) as Control;
-                    return false;
-                }
-            }
-            else if (_touchDragStart is { } start && input.Mouse.IsDown(MouseButton.Left))
-            {
-                float dy = pointer.Y - start.Y;
-                if (!_isDragging && MathF.Abs(dy) > 10f)
-                {
-                    _isDragging = true;
-                }
-
-                if (_isDragging)
-                {
-                    _scroll.ScrollOffset = _touchDragStartOffset - dy;
-                    return false;
-                }
-            }
-            else if (input.Mouse.WasReleased(MouseButton.Left) || !input.Mouse.IsDown(MouseButton.Left))
-            {
-                if (_touchDragStart is not null)
-                {
-                    _touchDragStart = null;
-                    if (!_isDragging)
-                    {
-                        _pendingTapTarget?.ActivateAt(pointer);
-                    }
-
-                    _isDragging = false;
-                    _pendingTapTarget = null;
-                    return false;
-                }
-            }
+            return false;
         }
 
         return base.HandleInput(nav, input);
@@ -249,7 +217,7 @@ internal sealed class LoadGameTile : Control
         float appear = Visual.Appear;
         float hot = MathF.Max(Visual.Focus, IsPointerOver ? 1f : 0f);
 
-        painter.FillRect(Bounds, UiPalette.Fade(UiPalette.White(0.02f), appear));
+        painter.FillRect(Bounds, UiPalette.Fade(ShellBackButton.PanelFill, appear));
         Bgra32 border = Interpolate.Lerp(Theme.Border, UiPalette.AccentAt(0.45f), hot);
         painter.StrokeRect(Bounds, context.Px(1f), UiPalette.Fade(border, appear));
 
@@ -261,7 +229,7 @@ internal sealed class LoadGameTile : Control
         }
         else
         {
-            painter.FillRect(picture, UiPalette.Fade(Bgra32.FromRgb(8, 10, 18), appear));
+            painter.FillRect(picture, UiPalette.Fade(ShellBackButton.PanelFill, appear));
         }
 
         float textX = Bounds.X + ThumbnailWidth + context.Px(20f);

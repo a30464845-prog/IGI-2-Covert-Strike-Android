@@ -58,19 +58,19 @@ public sealed class ProfilesScreen : ShellScreen
     protected override ShellTab Tab => ShellTab.Profile;
 
     /// <inheritdoc/>
-    protected override IReadOnlyList<KeyHint> Hints => [new("CLICK", "Set active"), new("ENTER", "Load save"), new("ESC", "Back")];
-
-    /// <inheritdoc/>
     protected override UiElement? BuildContent(LayoutContext context)
     {
         UiTheme theme = Context.Theme;
-        var columns = new Grid { ColumnSpacing = 32f, Padding = new Thickness(SideMargin, 48f, SideMargin, 40f) };
+        var columns = new Grid { ColumnSpacing = 32f, RowSpacing = 16f, Padding = new Thickness(SideMargin, 32f, SideMargin, 40f) };
         columns.ColumnDefinitions.Add(GridLength.Absolute(600f));
         columns.ColumnDefinitions.Add(GridLength.Star);
+        columns.RowDefinitions.Add(GridLength.Auto);
         columns.RowDefinitions.Add(GridLength.Star);
 
-        columns.Add(BuildProfileRail(theme), 0, 0);
-        columns.Add(BuildWorkspace(theme), 0, 1);
+        // Back, top-left: out of a create/delete workflow first, then to the shell home page.
+        columns.Add(ShellBackButton.PageBack(theme, GoBack), 0, 0, 1, 2);
+        columns.Add(BuildProfileRail(theme), 1, 0);
+        columns.Add(BuildWorkspace(theme), 1, 1);
         Refresh();
         return columns;
     }
@@ -78,14 +78,28 @@ public sealed class ProfilesScreen : ShellScreen
     /// <inheritdoc/>
     protected override bool HandleInput(UiNavigation nav, ProjectIGI.Input.InputState input)
     {
-        // Escape backs out of an in-page workflow before leaving the whole profile workspace.
-        if (nav.Back && _mode != DetailMode.Profile)
+        // Back backs out of an in-page workflow before leaving the whole profile workspace;
+        // on the profile itself it leaves for the shell home page. (It used to do nothing there:
+        // the stack holds a single screen, so an unhandled back could never pop anywhere.)
+        if (nav.Back)
         {
-            ShowProfileDetails();
+            GoBack();
             return false;
         }
 
         return base.HandleInput(nav, input);
+    }
+
+    /// <summary>What back means on this page: close the workflow, or leave for the home page.</summary>
+    private void GoBack()
+    {
+        if (_mode != DetailMode.Profile)
+        {
+            ShowProfileDetails();
+            return;
+        }
+
+        Context.Stack.Reset(new MainMenuScreen(Context));
     }
 
     /// <inheritdoc/>
@@ -119,7 +133,7 @@ public sealed class ProfilesScreen : ShellScreen
         for (int i = 0; i < GameConfig.MaxProfiles; i++)
         {
             int index = i;
-            var card = new ProfileCard(theme, string.Empty) { Visibility = Visibility.Collapsed, Id = $"profile-card-{i}" };
+            var card = new ProfileCard(theme, string.Empty) { Visibility = Visibility.Collapsed, Id = $"profile-card-{i}", Height = ShellSizes.MinTappable };
             card.Activated += _ => SelectProfile(index);
             _cards.Add(card);
             cards.AddChild(card);
@@ -134,6 +148,7 @@ public sealed class ProfilesScreen : ShellScreen
             Font = theme.Display,
             TextSize = 22f,
             Tracking = 0.2f,
+            Height = ShellSizes.MinTappable,
             Padding = new Thickness(24f, 20f),
             Tooltip = "Create a new player profile with its own campaign difficulty.",
         };
@@ -194,6 +209,7 @@ public sealed class ProfilesScreen : ShellScreen
             Accent = ButtonAccent.Destructive,
             TextSize = 17f,
             Tracking = 0.18f,
+            Height = ShellSizes.MinTappable,
             Padding = new Thickness(24f, 16f),
             VerticalAlignment = VerticalAlignment.Bottom,
             Tooltip = "Permanently delete this profile and every save slot belonging to it.",
@@ -219,6 +235,7 @@ public sealed class ProfilesScreen : ShellScreen
         {
             Id = "profile-name",
             Placeholder = "Enter profile name",
+            Height = ShellSizes.MinTappable,
             MaxLength = PlayerProfile.NameCapacity - 1,
             Tooltip = "Names must be unique and can be up to 31 characters.",
         };
@@ -226,12 +243,14 @@ public sealed class ProfilesScreen : ShellScreen
 
         _difficulty = new Dropdown(theme, "Difficulty", AiDifficultyNames.All, 1)
         {
+            Height = ShellSizes.MinTappable,
             Tooltip = "Easy, Normal, and Hard are saved with this profile.",
         };
         column.AddChild(_difficulty);
 
         _unlockAllMissions = new Toggle(theme, "Temporary: unlock all missions")
         {
+            Height = ShellSizes.MinTappable,
             Tooltip = "Testing option: make every campaign mission available for this profile.",
         };
         column.AddChild(_unlockAllMissions);
@@ -240,9 +259,9 @@ public sealed class ProfilesScreen : ShellScreen
         column.AddChild(_formError);
 
         var actions = new FlexPanel { Orientation = Orientation.Horizontal, Gap = 12f };
-        var create = new Button(theme, "CREATE PROFILE") { Accent = ButtonAccent.Solid, CutCorner = 10f, TextSize = 17f, Tracking = 0.18f, Padding = new Thickness(26f, 14f) };
+        var create = new Button(theme, "CREATE PROFILE") { Accent = ButtonAccent.Solid, CutCorner = 10f, TextSize = 17f, Tracking = 0.18f, Height = ShellSizes.MinTappable, Padding = new Thickness(26f, 14f) };
         create.Activated += _ => CreateProfile();
-        var cancel = new Button(theme, "CANCEL") { Accent = ButtonAccent.Ghost, TextSize = 17f, Tracking = 0.18f, Padding = new Thickness(26f, 14f) };
+        var cancel = new Button(theme, "CANCEL") { Accent = ButtonAccent.Ghost, TextSize = 17f, Tracking = 0.18f, Height = ShellSizes.MinTappable, Padding = new Thickness(26f, 14f) };
         cancel.Activated += _ => ShowProfileDetails();
         actions.Add(create);
         actions.Add(cancel);
@@ -261,9 +280,9 @@ public sealed class ProfilesScreen : ShellScreen
         column.AddChild(new Label(theme.Body, "This cannot be undone.", 16f, theme.Destructive));
 
         var actions = new FlexPanel { Orientation = Orientation.Horizontal, Gap = 12f, Margin = new Thickness(0f, 8f, 0f, 0f) };
-        var confirm = new Button(theme, "DELETE PERMANENTLY") { Accent = ButtonAccent.Destructive, TextSize = 17f, Tracking = 0.18f, Padding = new Thickness(26f, 14f) };
+        var confirm = new Button(theme, "DELETE PERMANENTLY") { Accent = ButtonAccent.Destructive, TextSize = 17f, Tracking = 0.18f, Height = ShellSizes.MinTappable, Padding = new Thickness(26f, 14f) };
         confirm.Activated += _ => DeleteProfile();
-        var cancel = new Button(theme, "CANCEL") { Accent = ButtonAccent.Ghost, TextSize = 17f, Tracking = 0.18f, Padding = new Thickness(26f, 14f) };
+        var cancel = new Button(theme, "CANCEL") { Accent = ButtonAccent.Ghost, TextSize = 17f, Tracking = 0.18f, Height = ShellSizes.MinTappable, Padding = new Thickness(26f, 14f) };
         cancel.Activated += _ => ShowProfileDetails();
         actions.Add(confirm);
         actions.Add(cancel);
@@ -274,26 +293,31 @@ public sealed class ProfilesScreen : ShellScreen
 
     private GlassPanel BuildSaves(UiTheme theme)
     {
-        var panel = new GlassPanel(theme) { Padding = new Thickness(44f, 32f) };
+        var panel = new GlassPanel(theme) { Padding = new Thickness(44f, 32f), Tint = ShellBackButton.PanelFill, Blur = 0f, Border = ShellBackButton.AccentBlue };
         var layout = new Grid { RowSpacing = 20f };
         layout.ColumnDefinitions.Add(GridLength.Star);
         layout.ColumnDefinitions.Add(GridLength.Auto);
+        layout.RowDefinitions.Add(GridLength.Auto);
         layout.RowDefinitions.Add(GridLength.Auto);
         layout.RowDefinitions.Add(GridLength.Star);
 
         layout.Add(new Eyebrow(theme, "Profile saves") { VerticalAlignment = VerticalAlignment.Center }, 0, 0);
 
         var actions = new FlexPanel { Orientation = Orientation.Horizontal, Gap = 10f };
-        var save = new Button(theme, "SAVE") { Accent = ButtonAccent.Solid, TextSize = 17f, Tracking = 0.18f, Padding = new Thickness(26f, 12f) };
+        var save = new Button(theme, "SAVE") { Accent = ButtonAccent.Solid, TextSize = 17f, Tracking = 0.18f, Height = ShellSizes.MinTappable, Padding = new Thickness(26f, 12f) };
         save.Activated += _ => SaveToSelectedSlot();
-        var load = new Button(theme, "LOAD") { Accent = ButtonAccent.Ghost, TextSize = 17f, Tracking = 0.18f, Padding = new Thickness(26f, 12f) };
+        var load = new Button(theme, "LOAD") { Accent = ButtonAccent.Ghost, TextSize = 17f, Tracking = 0.18f, Height = ShellSizes.MinTappable, Padding = new Thickness(26f, 12f) };
         load.Activated += _ => LoadSelectedSlot();
-        var delete = new Button(theme, "DELETE SAVE") { Accent = ButtonAccent.Destructive, TextSize = 17f, Tracking = 0.18f, Padding = new Thickness(26f, 12f) };
+        var delete = new Button(theme, "DELETE SAVE") { Accent = ButtonAccent.Destructive, TextSize = 17f, Tracking = 0.18f, Height = ShellSizes.MinTappable, Padding = new Thickness(26f, 12f) };
         delete.Activated += _ => DeleteSelectedSlot();
         actions.Add(save);
         actions.Add(load);
         actions.Add(delete);
         layout.Add(actions, 0, 1);
+
+        // The touch instruction, on the screen: the old footer said ENTER loads a save, and the
+        // footer is never drawn on this page — a second tap on the selected slot is what loads it.
+        layout.Add(new Label(theme.Body, "Tap a slot to select it. Tap it again, or tap LOAD, to load it.", 16f, theme.TextMuted) { Wrap = true }, 1, 0, 1, 2);
 
         // Eight slots, four by two, the way the design lays them out.
         var grid = new Grid { RowSpacing = 12f, ColumnSpacing = 12f, Id = "profile-saves" };
@@ -314,16 +338,17 @@ public sealed class ProfilesScreen : ShellScreen
             grid.Add(tile, i / SlotColumns, i % SlotColumns);
         }
 
-        layout.Add(grid, 1, 0, columnSpan: 2);
+        layout.Add(grid, 2, 0, columnSpan: 2);
         panel.AddChild(layout);
         return panel;
     }
 
-    private static GlassPanel DetailPanel(UiTheme theme) => new(theme) { Padding = new Thickness(44f, 40f) };
+    private static GlassPanel DetailPanel(UiTheme theme) =>
+        new(theme) { Padding = new Thickness(44f, 40f), Tint = ShellBackButton.PanelFill, Blur = 0f, Border = ShellBackButton.AccentBlue };
 
     private void SelectSlot(int index)
     {
-        // A second press on the selected slot loads it, which is what ENTER on a slot means in the footer.
+        // A second press on the selected slot loads it; the saves panel says so on the screen.
         if (index == _selectedSlot && _slots[index].Content is not null)
         {
             LoadSelectedSlot();

@@ -1,7 +1,9 @@
 using ProjectIGI.Core.Configuration;
 using ProjectIGI.Frontend.Settings;
 using ProjectIGI.Game.Player;
+using ProjectIGI.Input;
 using ProjectIGI.UI;
+using ProjectIGI.UI.Focus;
 using ProjectIGI.UI.Kit.Widgets;
 using ProjectIGI.UI.Layout;
 using ProjectIGI.UI.Widgets;
@@ -25,7 +27,7 @@ namespace ProjectIGI.Frontend.Screens;
 public sealed class ExtrasScreen : ShellScreen
 {
     private const string CreditsText =
-        "PROJECT I.G.I.: I'M GOING IN\n\n" +
+        "I.G.I. 2: COVERT STRIKE\n\n" +
         "Tactical Espionage Action — Mobile Edition.\n\n" +
         "Custom high-performance WebGPU / WebAssembly architecture.\n" +
         "Hardware-accelerated tactical rendering engine.\n" +
@@ -73,8 +75,12 @@ public sealed class ExtrasScreen : ShellScreen
         }
 
         developer.Content.AddChild(new GroupHeader(theme, "Shortcuts") { Margin = new Thickness(0f, 18f, 0f, 4f) });
-        developer.Content.AddChild(new Label(theme.Body, "Photo mode — press F1 in a mission for the free camera.", 17f, UiPalette.TextBody) { Wrap = true, Margin = new Thickness(0f, 6f) });
-        developer.Content.AddChild(new Label(theme.Body, "Developer console — press ` at any time.", 17f, UiPalette.TextBody) { Wrap = true, Margin = new Thickness(0f, 6f) });
+        // No touch button opens either of these — both are keyboard-only in the code (F1 is read
+        // in the host's developer keys, the console in the host's console setup, and neither is
+        // exposed to the shell) — so the lines say plainly that a keyboard is needed, rather
+        // than telling a touch-only player to press a key they do not have.
+        developer.Content.AddChild(new Label(theme.Body, "Photo mode — free camera in a mission. Needs a keyboard: press F1.", 17f, UiPalette.TextBody) { Wrap = true, Margin = new Thickness(0f, 6f) });
+        developer.Content.AddChild(new Label(theme.Body, "Developer console — open it at any time. Needs a keyboard: press `.", 17f, UiPalette.TextBody) { Wrap = true, Margin = new Thickness(0f, 6f) });
 
         var cheats = Group(theme, "Cheats");
         cheats.Content.AddChild(new Label(
@@ -123,21 +129,37 @@ public sealed class ExtrasScreen : ShellScreen
         var scroll = new ScrollView(theme);
         scroll.SetContent(columns);
 
-        var page = new Grid { RowSpacing = 36f, Padding = new Thickness(SideMargin, 48f, SideMargin, 0f) };
+        var page = new Grid { RowSpacing = 24f, Padding = new Thickness(SideMargin, 32f, SideMargin, 0f) };
         page.ColumnDefinitions.Add(GridLength.Star);
         page.RowDefinitions.Add(GridLength.Auto);
+        page.RowDefinitions.Add(GridLength.Auto);
         page.RowDefinitions.Add(GridLength.Star);
-        page.Add(new SectionTitle(theme, "Archive", "Extras") { HorizontalAlignment = HorizontalAlignment.Left }, 0, 0);
-        page.Add(scroll, 1, 0);
+        // Back, top-left: to the shell home page. (It used to do nothing here: the stack holds a
+        // single screen, so an unhandled back could never pop anywhere.)
+        page.Add(ShellBackButton.PageBack(theme, () => Context.Stack.Reset(new MainMenuScreen(Context))), 0, 0);
+        page.Add(new SectionTitle(theme, "Archive", "Extras") { HorizontalAlignment = HorizontalAlignment.Left }, 1, 0);
+        page.Add(scroll, 2, 0);
         return page;
     }
 
-    /// <summary>A group of the page: a glass panel holding a heading and its rows.</summary>
+    /// <inheritdoc/>
+    protected override bool HandleInput(UiNavigation nav, InputState input)
+    {
+        if (nav.Back)
+        {
+            Context.Stack.Reset(new MainMenuScreen(Context));
+            return false;
+        }
+
+        return base.HandleInput(nav, input);
+    }
+
+    /// <summary>A group of the page: an opaque dark panel holding a heading and its rows.</summary>
     private static (GlassPanel Panel, StackPanel Content) Group(UiTheme theme, string title)
     {
         var content = new StackPanel { Orientation = Orientation.Vertical };
         content.AddChild(new GroupHeader(theme, title));
-        var panel = new GlassPanel(theme) { Padding = new Thickness(28f, 28f, 28f, 20f), VerticalAlignment = VerticalAlignment.Top };
+        var panel = new GlassPanel(theme) { Padding = new Thickness(28f, 28f, 28f, 20f), Tint = ShellBackButton.PanelFill, Blur = 0f, Border = ShellBackButton.AccentBlue, VerticalAlignment = VerticalAlignment.Top };
         panel.AddChild(content);
         return (panel, content);
     }
@@ -146,6 +168,7 @@ public sealed class ExtrasScreen : ShellScreen
     private static UiElement Row(UiElement row)
     {
         row.Margin = new Thickness(-10f, 0f);
+        row.Height = ShellSizes.MinTappable;
         return row;
     }
 

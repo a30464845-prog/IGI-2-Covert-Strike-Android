@@ -11,9 +11,8 @@ using ProjectIGI.UI.Widgets;
 namespace ProjectIGI.Frontend.Screens;
 
 /// <summary>
-/// Authentic Project I.G.I. 1 "Select Mission" screen:
-/// Direct replica of the classic mission selection dialog featuring mission thumbnail frame,
-/// objective text box, scrollable mission list with solid green active selection, and OK/Cancel actions.
+/// The I.G.I. 2 "Select Mission" screen: mission thumbnail frame, objective text box, scrollable
+/// mission list with a blue active selection, and OK/Cancel actions under the briefing.
 /// </summary>
 public sealed class CampaignScreen : ShellScreen
 {
@@ -36,13 +35,10 @@ public sealed class CampaignScreen : ShellScreen
     ];
 
     private readonly List<IgiMissionRow> _rowWidgets = [];
+    private readonly DragScrollHelper _dragScroll = new();
     private int _selectedIndex;
     private Label? _missionDescLabel;
     private ScrollView? _scroll;
-    private UiVec2? _touchDragStart;
-    private float _touchDragStartOffset;
-    private bool _isDragging;
-    private Control? _pendingTapTarget;
 
     /// <summary>Initializes a new instance of the <see cref="CampaignScreen"/> class.</summary>
     /// <param name="context">The shared shell context.</param>
@@ -68,6 +64,11 @@ public sealed class CampaignScreen : ShellScreen
 
         var root = new Canvas();
 
+        // Back, top-left: back to the shell home page.
+        root.Add(
+            ShellBackButton.MenuBack(theme, () => Context.Stack.Reset(new MainMenuScreen(Context))),
+            new Anchor(UiVec2.Zero, new UiVec2(0.30f, 0.12f), new Thickness(24f, 24f, 0f, 0f)));
+
         // 1. Logo at Top Center
         var logo = new IgiLogo(theme)
         {
@@ -77,11 +78,12 @@ public sealed class CampaignScreen : ShellScreen
         };
         root.Add(logo, new Anchor(UiVec2.Zero, new UiVec2(1f, 0.20f), Thickness.Zero));
 
-        // 2. Central Green Tactical Frame ("Select Mission")
+        // 2. Central Tactical Frame ("Select Mission"): opaque dark panel, blue hairline.
         var frame = new IgiTacticalFrame(theme, "Select Mission")
         {
             Width = 1420f,
             Height = 780f,
+            BackgroundColor = ShellBackButton.PanelFill,
             Margin = new Thickness(0f, 40f, 0f, 0f),
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center,
@@ -111,11 +113,12 @@ public sealed class CampaignScreen : ShellScreen
         thumbFrame.SetMission(DefaultMissions[0].Id);
         leftCol.AddChild(thumbFrame);
 
-        // Objective Description Box (matching authentic IGI 1 wireframe layout)
+        // Objective Description Box
         var descBox = new IgiBorderedBox
         {
             Width = 560f,
             Height = 100f,
+            BackgroundColor = ShellBackButton.PanelFill,
             Padding = new Thickness(16f, 16f),
         };
 
@@ -124,11 +127,12 @@ public sealed class CampaignScreen : ShellScreen
         leftCol.AddChild(descBox);
         mainLayout.Add(leftCol);
 
-        // ── RIGHT COLUMN: Mission List (wireframe container matching IGI 1) ─
+        // ── RIGHT COLUMN: Mission List ─
         var rightCol = new IgiBorderedBox
         {
             Width = 620f,
             Height = 580f,
+            BackgroundColor = ShellBackButton.PanelFill,
             Padding = new Thickness(4f, 4f),
         };
 
@@ -143,7 +147,7 @@ public sealed class CampaignScreen : ShellScreen
         var missionStack = new StackPanel
         {
             Orientation = Orientation.Vertical,
-            Spacing = 4f,
+            Spacing = 8f,
             Width = 590f,
         };
 
@@ -160,7 +164,7 @@ public sealed class CampaignScreen : ShellScreen
             {
                 IsSelected = index == _selectedIndex,
                 Width = 590f,
-                Height = 52f,
+                Height = ShellSizes.MinTappable,
             };
 
             row.Activated += () =>
@@ -187,23 +191,21 @@ public sealed class CampaignScreen : ShellScreen
         rightCol.AddChild(_scroll);
         mainLayout.Add(rightCol);
 
-        frame.AddChild(mainLayout);
-
-        // ── BOTTOM RIGHT BUTTONS: OK & Cancel (stacked vertically matching IGI 1) ─
+        // ── OK & Cancel, under the briefing: at the 48 dp height they no longer fit in the
+        // frame's bottom-right corner without covering the list, so they sit beside the mission
+        // they act on instead.
         var btnBar = new StackPanel
         {
-            Orientation = Orientation.Vertical,
+            Orientation = Orientation.Horizontal,
             Spacing = 16f,
-            HorizontalAlignment = HorizontalAlignment.Right,
-            VerticalAlignment = VerticalAlignment.Bottom,
-            Margin = new Thickness(0f, 0f, 32f, 28f),
+            Width = 560f,
         };
 
         var okBtn = new IgiMenuButton(theme, "OK")
         {
             TextSize = 32f,
-            Height = 54f,
-            Width = 140f,
+            Height = ShellSizes.MinTappable,
+            Width = 272f,
             NormalColor = Bgra32.FromRgb(80, 160, 255),
             HoverColor = Bgra32.FromRgb(228, 238, 252),
         };
@@ -217,15 +219,17 @@ public sealed class CampaignScreen : ShellScreen
         var cancelBtn = new IgiMenuButton(theme, "Cancel")
         {
             TextSize = 32f,
-            Height = 54f,
-            Width = 140f,
+            Height = ShellSizes.MinTappable,
+            Width = 272f,
             NormalColor = Bgra32.FromRgb(80, 160, 255),
             HoverColor = Bgra32.FromRgb(228, 238, 252),
         };
         cancelBtn.Activated += () => Context.Stack.Reset(new MainMenuScreen(Context));
         btnBar.AddChild(cancelBtn);
 
-        frame.AddChild(btnBar);
+        leftCol.AddChild(btnBar);
+
+        frame.AddChild(mainLayout);
         root.Add(frame, new Anchor(UiVec2.Zero, UiVec2.One, Thickness.Zero));
 
         return root;
@@ -240,50 +244,10 @@ public sealed class CampaignScreen : ShellScreen
             return false;
         }
 
-        if (_scroll is not null)
+        // Drag to scroll the mission list; a tap still selects the row under the pointer.
+        if (_dragScroll.HandleInput(_scroll, Focus, input))
         {
-            var pointer = new UiVec2(input.Mouse.X, input.Mouse.Y);
-            bool insideScroll = _scroll.Bounds.Contains(pointer);
-
-            if (input.Mouse.WasPressed(MouseButton.Left))
-            {
-                if (insideScroll && !_scroll.IsOverScrollbar(pointer))
-                {
-                    _touchDragStart = pointer;
-                    _touchDragStartOffset = _scroll.ScrollOffset;
-                    _isDragging = false;
-                    _pendingTapTarget = Focus?.FocusAt(pointer) as Control;
-                    return false;
-                }
-            }
-            else if (_touchDragStart is { } start && input.Mouse.IsDown(MouseButton.Left))
-            {
-                float dy = pointer.Y - start.Y;
-                if (!_isDragging && MathF.Abs(dy) > 10f)
-                {
-                    _isDragging = true;
-                }
-
-                if (_isDragging)
-                {
-                    _scroll.ScrollOffset = _touchDragStartOffset - dy;
-                    return false;
-                }
-            }
-            else if (input.Mouse.WasReleased(MouseButton.Left) || !input.Mouse.IsDown(MouseButton.Left))
-            {
-                if (_touchDragStart is not null)
-                {
-                    _touchDragStart = null;
-                    if (!_isDragging)
-                    {
-                        _pendingTapTarget?.ActivateAt(pointer);
-                    }
-                    _isDragging = false;
-                    _pendingTapTarget = null;
-                    return false;
-                }
-            }
+            return false;
         }
 
         return base.HandleInput(nav, input);
@@ -362,7 +326,7 @@ internal sealed class TacticalWireframeBox : UiElement
         }
 
         // 1. Dark tactical background
-        painter.FillRect(b, Bgra32.FromRgb(8, 10, 18));
+        painter.FillRect(b, Bgra32.FromRgb(8, 16, 30));
 
         // 2. Mission thumbnail image from Project IGI assets
         if (!_thumbnail.IsValid && _theme.ImageFactory is not null)
@@ -375,24 +339,24 @@ internal sealed class TacticalWireframeBox : UiElement
             painter.DrawSprite(_thumbnail, b, UiRect.Unit, Bgra32.White, UiBlend.Opaque);
         }
 
-        // 3. Green wireframe border over/around the preview
+        // 3. Blue wireframe border over/around the preview
         float stroke = painter.Context.Px(1.5f);
-        Bgra32 green = Bgra32.FromRgb(80, 160, 255);
-        painter.StrokeRect(b, stroke, green);
+        Bgra32 accent = Bgra32.FromRgb(80, 160, 255);
+        painter.StrokeRect(b, stroke, accent);
 
         // Corner tick marks
         float tick = painter.Context.Px(16f);
-        painter.StrokeSoft(new UiVec2(b.X, b.Y + tick), new UiVec2(b.X, b.Y), stroke, green);
-        painter.StrokeSoft(new UiVec2(b.X, b.Y), new UiVec2(b.X + tick, b.Y), stroke, green);
+        painter.StrokeSoft(new UiVec2(b.X, b.Y + tick), new UiVec2(b.X, b.Y), stroke, accent);
+        painter.StrokeSoft(new UiVec2(b.X, b.Y), new UiVec2(b.X + tick, b.Y), stroke, accent);
 
-        painter.StrokeSoft(new UiVec2(b.Right - tick, b.Y), new UiVec2(b.Right, b.Y), stroke, green);
-        painter.StrokeSoft(new UiVec2(b.Right, b.Y), new UiVec2(b.Right, b.Y + tick), stroke, green);
+        painter.StrokeSoft(new UiVec2(b.Right - tick, b.Y), new UiVec2(b.Right, b.Y), stroke, accent);
+        painter.StrokeSoft(new UiVec2(b.Right, b.Y), new UiVec2(b.Right, b.Y + tick), stroke, accent);
 
-        painter.StrokeSoft(new UiVec2(b.X, b.Bottom - tick), new UiVec2(b.X, b.Bottom), stroke, green);
-        painter.StrokeSoft(new UiVec2(b.X, b.Bottom), new UiVec2(b.X + tick, b.Bottom), stroke, green);
+        painter.StrokeSoft(new UiVec2(b.X, b.Bottom - tick), new UiVec2(b.X, b.Bottom), stroke, accent);
+        painter.StrokeSoft(new UiVec2(b.X, b.Bottom), new UiVec2(b.X + tick, b.Bottom), stroke, accent);
 
-        painter.StrokeSoft(new UiVec2(b.Right - tick, b.Bottom), new UiVec2(b.Right, b.Bottom), stroke, green);
-        painter.StrokeSoft(new UiVec2(b.Right, b.Bottom), new UiVec2(b.Right, b.Bottom - tick), stroke, green);
+        painter.StrokeSoft(new UiVec2(b.Right - tick, b.Bottom), new UiVec2(b.Right, b.Bottom), stroke, accent);
+        painter.StrokeSoft(new UiVec2(b.Right, b.Bottom), new UiVec2(b.Right, b.Bottom - tick), stroke, accent);
 
         if (!_thumbnail.IsValid)
         {
