@@ -64,10 +64,21 @@ public sealed class Igi2Gameplay : ITitleGameplay
         new((ulong)Igi2PlayerAction.ModifyWalkRun, new("Title_igi2_ModifyWalkRun", Game.Config.InputBindingKeyNames.KeyboardDevice, "KEY_LEFT_ALT"), "Hold to walk"),
     ];
 
+    /// <summary>Gets the marks the mission's rounds have left on the world.</summary>
+    /// <remarks>
+    /// Owned by the mission, like Project I.G.I.'s <c>PlayerShotResolver.Marks</c>: the player's weapons
+    /// and the soldiers' arms both write into it, and the host draws it through the mission world view.
+    /// A new player stands for a new level, so <see cref="CreatePlayer"/> empties it first.
+    /// </remarks>
+    public BulletMarks Marks { get; } = new();
+
     /// <inheritdoc/>
     public ITitlePlayer? CreatePlayer(in TitlePlayerRequest request)
     {
         ArgumentNullException.ThrowIfNull(request.Services);
+
+        // A new player stands for a new level: the last mission's holes go with it.
+        Marks.Clear();
         if (!PlayerSpawn.TryFindGameplay(request.World.LevelRoot, out PlayerSpawnPoint spawn))
         {
             return null;
@@ -135,7 +146,7 @@ public sealed class Igi2Gameplay : ITitleGameplay
         if (weapons is not null)
         {
             weapons.Effects = new Igi2LevelWeaponEffects(sounds, () => player.Human.View.Position, LevelAi(request.Services), player.EjectCasing);
-            weapons.ImpactEffects = new Igi2LevelImpactEffects(sounds, LevelAi(request.Services));
+            weapons.ImpactEffects = new Igi2LevelImpactEffects(sounds, LevelAi(request.Services), Marks);
         }
 
         if (request.Services.TryGet(out Igi2GameMaterials? materials))
@@ -258,7 +269,8 @@ public sealed class Igi2Gameplay : ITitleGameplay
                 request.Services.TryGet(out Scripting.Igi2ScriptFunctions? lineFunctions) ? lineFunctions : null,
                 worn,
                 player.Casings,
-                log)
+                log,
+                marks: Marks)
             : null;
 
         // The level's figures: each its face, its clips and its first pause, from the module's blink stream; then its weapon expression.
@@ -424,6 +436,7 @@ public sealed class Igi2Gameplay : ITitleGameplay
     /// <param name="worn">The model each soldier wears, its face given (<see cref="Igi2HumanFaces.Assign"/>).</param>
     /// <param name="casings">Where the soldiers' spent casings fly, or <see langword="null"/> for nowhere.</param>
     /// <param name="logger">The logger for spawn diagnostics, or <see langword="null"/> for none.</param>
+    /// <param name="marks">Where the soldiers' rounds leave their holes, or <see langword="null"/> for none.</param>
     /// <returns>The soldiers.</returns>
     /// <remarks>
     /// Every human's inventory is made within the ammunition limits (<c>Human_CreateHandler</c>, <c>igi2 0x4FDC90</c>) and filled by
@@ -446,7 +459,8 @@ public sealed class Igi2Gameplay : ITitleGameplay
         Scripting.Igi2ScriptFunctions? functions = null,
         IReadOnlyDictionary<Engine.Tasks.GameTask, string>? worn = null,
         Weapons.Igi2GunCasings? casings = null,
-        IProjectIGILogger? logger = null)
+        IProjectIGILogger? logger = null,
+        BulletMarks? marks = null)
     {
         ArgumentNullException.ThrowIfNull(root);
         ArgumentNullException.ThrowIfNull(services);
@@ -553,7 +567,7 @@ public sealed class Igi2Gameplay : ITitleGameplay
                         Igi2TitlePlayer.EjectFrom(casings, casing, Igi2BodyFrame.Build(shooter, shooter.BodyPose(), dress.Name, held, 0), held, shooter.TotalSpeed);
                     }
                 });
-                arms.ImpactEffects = new Igi2LevelImpactEffects(sounds, LevelAi(services)) { Explosions = grenades?.Explosions };
+                arms.ImpactEffects = new Igi2LevelImpactEffects(sounds, LevelAi(services), marks) { Explosions = grenades?.Explosions };
                 if (materials is not null)
                 {
                     arms.World = new Igi2LevelGunShotWorld(world, materials, LevelAi(services));
