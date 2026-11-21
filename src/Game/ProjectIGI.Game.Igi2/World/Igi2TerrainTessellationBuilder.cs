@@ -371,6 +371,21 @@ internal sealed class Igi2TerrainTessellationBuilder
         float z0 = (float)(low - eye.Z);
         float z1 = (float)(high - eye.Z);
 
+        // The view-distance far plane, when one is set: a square whose nearest corner
+        // stands past it is not drawn at all. Nearest-point, not centre, so a square
+        // straddling the boundary still draws and the ground never ends mid-square.
+        if (_view.Far < double.PositiveInfinity)
+        {
+            double nx = x0 > 0f ? x0 : (x1 < 0f ? -x1 : 0f);
+            double ny = y0 > 0f ? y0 : (y1 < 0f ? -y1 : 0f);
+            double nz = z0 > 0f ? z0 : (z1 < 0f ? -z1 : 0f);
+            double nearestSquared = (nx * nx) + (ny * ny) + (nz * nz);
+            if (nearestSquared > _view.Far * _view.Far)
+            {
+                return true;
+            }
+        }
+
         foreach (Vector3f normal in planes)
         {
             bool allOutside = true;

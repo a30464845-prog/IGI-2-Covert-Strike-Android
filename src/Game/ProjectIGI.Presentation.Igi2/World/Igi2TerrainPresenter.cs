@@ -344,10 +344,25 @@ public sealed class Igi2TerrainPresenter : ITerrainPresenter
         // the level's Detail and Adaption scale a squared edge length measured against the eye, and the
         // original measures it in the same units the height field is stored in. So the eye is converted
         // rather than the terrain -- which is what Project I.G.I.'s octree traversal does too.
+        // The frame's projection carries the view-distance far plane (the host builds it
+        // with far: FarPlane). For CreatePerspective's layout the far distance is
+        // -M34 / (M33 - 1); a projection that is not a perspective one yields no cap,
+        // which is the safe direction -- the ground draws as it did.
+        float farMetres = float.PositiveInfinity;
+        if (frame.Projection.M33 > 1f)
+        {
+            float far = -frame.Projection.M34 / (frame.Projection.M33 - 1f);
+            if (far > 0f && float.IsFinite(far))
+            {
+                farMetres = far;
+            }
+        }
+
         Igi2TerrainView view = Igi2TerrainView.FromCamera(
             new Camera3D(WorldScene.ToUnits(frame.Camera.Position), frame.Camera.Orientation),
             frame.VerticalFieldOfView,
-            frame.AspectRatio);
+            frame.AspectRatio,
+            farMetres * WorldScene.UnitsPerMetre);
 
         // Onto the pool the frames still in flight are not reading -- see ChunkPoolSlots.
         _poolSlot = (_poolSlot + 1) % ChunkPoolSlots;
