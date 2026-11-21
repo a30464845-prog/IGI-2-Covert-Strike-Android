@@ -21,7 +21,8 @@ namespace ProjectIGI.Game.Igi2.World;
 /// </para>
 /// <para>
 /// There is no near or far plane in the set — four side planes only. Distance is what the detail test
-/// is for.
+/// is for. A far distance may additionally be carried (see <see cref="Far"/>): it is a distance cap,
+/// not a fifth plane, and drops squares standing wholly past it.
 /// </para>
 /// </remarks>
 public readonly struct Igi2TerrainView
@@ -34,14 +35,19 @@ public readonly struct Igi2TerrainView
     /// The outward normals of the half-spaces to cull against, all through <paramref name="eye"/>. Pass
     /// nothing to cull against nothing.
     /// </param>
-    public Igi2TerrainView(Vector3d eye, ReadOnlySpan<Vector3f> planeNormals)
+    /// <param name="far">How far the ground is drawn, in world units; infinite draws it all.</param>
+    public Igi2TerrainView(Vector3d eye, ReadOnlySpan<Vector3f> planeNormals, double far = double.PositiveInfinity)
     {
         Eye = eye;
         _normals = planeNormals.IsEmpty ? null : planeNormals.ToArray();
+        Far = far;
     }
 
     /// <summary>Gets the eye position, in world units.</summary>
     public Vector3d Eye { get; }
+
+    /// <summary>Gets how far the ground is drawn, in world units; <see cref="double.PositiveInfinity"/> draws it all.</summary>
+    public double Far { get; }
 
     /// <summary>Gets the outward normals of the culling half-spaces, all through <see cref="Eye"/>.</summary>
     public ReadOnlySpan<Vector3f> PlaneNormals => _normals ?? [];
@@ -50,6 +56,7 @@ public readonly struct Igi2TerrainView
     /// <param name="camera">The eye and its orientation, in the height field's units.</param>
     /// <param name="verticalFieldOfView">The vertical field of view, in radians.</param>
     /// <param name="aspectRatio">The width over the height.</param>
+    /// <param name="far">How far the ground is drawn, in world units; infinite draws it all.</param>
     /// <returns>The view, with the frustum's four side planes.</returns>
     /// <remarks>
     /// <para>
@@ -72,7 +79,7 @@ public readonly struct Igi2TerrainView
     /// zero normals, which reject nothing. That is the safe direction to fail in.
     /// </para>
     /// </remarks>
-    public static Igi2TerrainView FromCamera(in Camera3D camera, float verticalFieldOfView, float aspectRatio)
+    public static Igi2TerrainView FromCamera(in Camera3D camera, float verticalFieldOfView, float aspectRatio, double far = double.PositiveInfinity)
     {
         float tanY = MathF.Tan(verticalFieldOfView * 0.5f);
         float tanX = tanY * aspectRatio;
@@ -94,7 +101,7 @@ public readonly struct Igi2TerrainView
             world[i] = camera.Orientation.Transform(view[i]);
         }
 
-        return new Igi2TerrainView(camera.Position, world);
+        return new Igi2TerrainView(camera.Position, world, far);
     }
 
 }
