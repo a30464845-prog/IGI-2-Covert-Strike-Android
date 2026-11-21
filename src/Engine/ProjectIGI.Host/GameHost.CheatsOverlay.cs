@@ -26,7 +26,6 @@ public sealed partial class GameHost
         Benchmark,
         Settings,
         Console,
-        Keyboard,
     }
 
     private readonly record struct MenuStripRow(MenuStripAction Action, UiRect Rect);
@@ -47,7 +46,6 @@ public sealed partial class GameHost
             MenuStripAction.Benchmark,
             MenuStripAction.Settings,
             MenuStripAction.Console,
-            MenuStripAction.Keyboard,
         ];
         var rows = new MenuStripRow[actions.Length];
         for (int i = 0; i < actions.Length; i++)
@@ -66,7 +64,6 @@ public sealed partial class GameHost
         MenuStripAction.Benchmark => "BENCHMARK",
         MenuStripAction.Settings => "SETTINGS",
         MenuStripAction.Console => "CONSOLE",
-        MenuStripAction.Keyboard => "KEYBOARD",
         _ => string.Empty,
     };
 
@@ -176,13 +173,6 @@ public sealed partial class GameHost
                     case MenuStripAction.Console:
                         state.Console.Model.IsOpen = !state.Console.Model.IsOpen;
                         KeyboardRequested = state.Console.Model.IsOpen;
-                        break;
-
-                    // Keyboard: taps toggle the soft keyboard so the player can type
-                    // names and other menu text even when the automatic focus
-                    // detection does not fire.
-                    case MenuStripAction.Keyboard:
-                        KeyboardRequested = !KeyboardRequested;
                         break;
                 }
 
@@ -325,13 +315,12 @@ public sealed partial class GameHost
 
         // ── 1. Main-menu strip: labelled 48 dp rows, top-right ──────────────
         // One row per entry, glyph + label, opaque dark with the accent hairline.
-        // The console and keyboard rows fill accent while their state is on.
+        // The console row fills accent while its state is on.
         foreach (MenuStripRow row in MenuStripRows(width, scale))
         {
             bool highlighted = row.Action switch
             {
                 MenuStripAction.Console => state.Console.IsOpen,
-                MenuStripAction.Keyboard => KeyboardRequested,
                 _ => false,
             };
             Bgra32 fill = highlighted ? accent : panel;
@@ -388,30 +377,6 @@ public sealed partial class GameHost
                             promptSize, glyphColor);
                     }
 
-                    break;
-
-                case MenuStripAction.Keyboard:
-                    // Two rows of keys and a spacebar.
-                    float key = 3f * gs;
-                    float keyGap = 2f * gs;
-                    float keysW = (4f * key) + (3f * keyGap);
-                    float keysX = gx + ((28f * gs - keysW) * 0.5f);
-                    float row1Y = gy + (5.5f * gs);
-                    for (int i = 0; i < 4; i++)
-                    {
-                        painter.FillRect(new UiRect(keysX + (i * (key + keyGap)), row1Y, key, key), glyphColor);
-                    }
-
-                    float row2Y = row1Y + key + keyGap;
-                    for (int i = 0; i < 4; i++)
-                    {
-                        painter.FillRect(new UiRect(keysX + (i * (key + keyGap)), row2Y, key, key), glyphColor);
-                    }
-
-                    float spaceW = keysW * 0.6f;
-                    float spaceX = gx + ((28f * gs - spaceW) * 0.5f);
-                    float spaceY = row2Y + key + keyGap;
-                    painter.FillRect(new UiRect(spaceX, spaceY, spaceW, key), glyphColor);
                     break;
             }
 
