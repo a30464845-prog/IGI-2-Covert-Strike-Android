@@ -286,12 +286,23 @@ public sealed class Igi2WorldScene
 
     /// <summary>Gets every placement a world pass should draw.</summary>
     /// <remarks>
-    /// <see cref="Placements"/> less <see cref="CharacterTypes"/>. Kept as a filter over the whole list
+    /// <see cref="Placements"/> less <see cref="CharacterTypes"/> and the no-model
+    /// sentinel (see <see cref="IsNoneModel"/>). Kept as a filter over the whole list
     /// rather than applied during the walk, because what counts as a character is a judgement the scene
     /// should be able to state and a caller should be able to disagree with.
     /// </remarks>
     public IEnumerable<Igi2Placement> StaticPlacements =>
-        Placements.Where(static p => !CharacterTypes.Contains(p.TypeName));
+        Placements.Where(static p => !CharacterTypes.Contains(p.TypeName) && !IsNoneModel(p.Model));
+
+    /// <summary>Whether a placement names the level data's no-model sentinel.</summary>
+    /// <remarks>
+    /// "none" is what a task that places no model names, but the packs resolve it to a
+    /// placeholder mesh whose textures do not resolve, so the port draws a floating white
+    /// box for every task that names it -- in almost every mission. Such a task places
+    /// nothing: no draw, no collision solid, no magic object.
+    /// </remarks>
+    private static bool IsNoneModel(string model) =>
+        string.Equals(model, "none", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>Gets the resource name a model is loaded under.</summary>
     /// <param name="model">The model as level data names it.</param>
