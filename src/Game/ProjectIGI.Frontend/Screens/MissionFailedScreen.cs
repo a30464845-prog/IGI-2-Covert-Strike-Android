@@ -8,9 +8,14 @@ using ProjectIGI.UI.Widgets;
 namespace ProjectIGI.Frontend.Screens;
 
 /// <summary>
-/// Authentic Project I.G.I. 1 "Mission Failed" screen:
-/// Tactical debriefing dialog presented upon player death or objective failure.
+/// The I.G.I. 2 "Mission Failed" dialog, shown upon player death or objective failure: restart the
+/// mission, or abandon it and return to the main menu.
 /// </summary>
+/// <remarks>
+/// Back is defined by the existing code and kept as-is: Android Back (or Escape) abandons the mission,
+/// exactly like the Abort button. There is no "previous screen" to go back to — the mission is over —
+/// so back cannot mean anything gentler.
+/// </remarks>
 public sealed class MissionFailedScreen : ShellScreen
 {
     /// <summary>Initializes a new instance of the <see cref="MissionFailedScreen"/> class.</summary>
@@ -36,13 +41,18 @@ public sealed class MissionFailedScreen : ShellScreen
 
         var root = new Canvas();
 
-        // Central Tactical Frame with Danger accent: only "Mission Failed" at top bar
+        // Back, top-left: abandons the mission, the same as Android Back and the Abort button.
+        root.Add(
+            ShellBackButton.MenuBack(theme, () => Context.Host.AbandonMission()),
+            new Anchor(UiVec2.Zero, new UiVec2(0.30f, 0.12f), new Thickness(24f, 24f, 0f, 0f)));
+
+        // Central frame with a danger accent: opaque dark panel, red hairline.
         var frame = new IgiTacticalFrame(theme, "Mission Failed")
         {
             Width = 840f,
             Height = 440f,
-            BorderColor = Bgra32.FromRgb(255, 75, 65),
-            BackgroundColor = Bgra32.FromRgba(18, 10, 10, 240),
+            BorderColor = Bgra32.FromRgb(255, 95, 80),
+            BackgroundColor = ShellBackButton.PanelFill,
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center,
         };
@@ -57,11 +67,22 @@ public sealed class MissionFailedScreen : ShellScreen
             VerticalAlignment = VerticalAlignment.Center,
         };
 
+        // What the two buttons below do, in words.
+        contentStack.AddChild(new Label(
+            theme.Body,
+            "The mission is over. Restart it, or abandon it and return to the main menu.",
+            20f,
+            theme.Text)
+        {
+            Wrap = true,
+            HorizontalAlignment = HorizontalAlignment.Center,
+        });
+
         // 1. Under top bar: "Abort the Mission"
         var abortBtn = new IgiMenuButton(theme, "Abort the Mission")
         {
             TextSize = 34f,
-            Height = 72f,
+            Height = ShellSizes.MinTappable,
             Width = 660f,
             NormalColor = Bgra32.FromRgb(255, 80, 70),
             HoverColor = Bgra32.FromRgb(255, 180, 170),
@@ -73,7 +94,7 @@ public sealed class MissionFailedScreen : ShellScreen
         var restartBtn = new IgiMenuButton(theme, "Restart Mission")
         {
             TextSize = 34f,
-            Height = 72f,
+            Height = ShellSizes.MinTappable,
             Width = 660f,
             NormalColor = Bgra32.FromRgb(80, 160, 255),
             HoverColor = Bgra32.FromRgb(228, 238, 252),
@@ -90,6 +111,7 @@ public sealed class MissionFailedScreen : ShellScreen
     /// <inheritdoc/>
     protected override bool HandleInput(UiNavigation nav, InputState input)
     {
+        // Back abandons the mission — the behaviour the code already defined. Kept, not invented.
         if (nav.Back || input.Keyboard.WasPressed(KeyCode.Escape))
         {
             Context.Host.AbandonMission();
