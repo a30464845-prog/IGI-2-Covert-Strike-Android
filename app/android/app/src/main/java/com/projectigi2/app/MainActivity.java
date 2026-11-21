@@ -1454,7 +1454,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         // via the keyboard icon in the main menu (under the cheats gear), so player names
         // and other menu text can be typed even when the automatic focus detection does
         // not fire. The icon toggles the request; Back clears it.
-        boolean focused = isGameStarted && NativeEngine.nativeIsKeyboardRequested();
+        boolean focused = isGameStarted && (NativeEngine.nativeIsKeyboardRequested() || NativeEngine.nativeIsTextFieldFocused());
         InputMethodManager imm = (InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
         if (focused && !imeShown) {
             if (hiddenInput != null && imm != null) {
