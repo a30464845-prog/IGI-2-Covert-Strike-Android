@@ -267,7 +267,7 @@ public sealed class Igi2ConfigNatives : IMenuConfiguration, IMenuMissionStats
                 return true;
 
             case "Config_GetActiveDifficultyLevel":
-                result = QvmValue.FromInt32(_config.Active?.Difficulty ?? 0);
+                result = QvmValue.FromInt32(_config.Active?.Difficulty ?? 1);
                 return true;
 
             case "Config_SetActiveDifficultyLevel":

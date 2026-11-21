@@ -291,7 +291,8 @@ public sealed class Igi2GameConfig
                 CallSign = name.Length > Igi2PlayerProfile.CallSignLength ? name[..Igi2PlayerProfile.CallSignLength] : name,
                 InvertMouse = false,
                 MouseSensitivity = 0f,
-                Difficulty = 0,
+                // Without a GOGameDiff after it, the profile keeps the class default: Normal.
+                Difficulty = 1,
                 Blood = false,
                 Speech = default,
                 Music = default,
@@ -387,7 +388,7 @@ public sealed class Igi2GameConfig
         void Fn(string name, Scripting.Igi2ScriptFunction function, int arguments) =>
             Scripting.Igi2ScriptCall.Register(natives, functions, name, function, arguments);
 
-        Fn("Config_GetActiveDifficultyLevel", _ => QvmValue.FromInt32(Active?.Difficulty ?? 0), 0);
+        Fn("Config_GetActiveDifficultyLevel", _ => QvmValue.FromInt32(Active?.Difficulty ?? 1), 0);
         Fn("Config_SetActiveDifficultyLevel", c => Set(p => p.Difficulty = c.GetInt32(0)), 1);
         Fn("Config_GameOptionsInputGetInvertMouse", _ => QvmValue.FromInt32(Active?.InvertMouse == true ? 1 : 0), 0);
         Fn("Config_GameOptionsInputSetInvertMouse", c => Set(p => p.InvertMouse = c.GetInt32(0) != 0), 1);
