@@ -3,6 +3,7 @@ using System.Text;
 using ProjectIGI.Core.Numerics;
 using ProjectIGI.Game.Igi2.Collision;
 using ProjectIGI.Game.Igi2.Weapons;
+using ProjectIGI.Game.World;
 
 namespace ProjectIGI.Game.Igi2.Interaction;
 
@@ -10,7 +11,7 @@ namespace ProjectIGI.Game.Igi2.Interaction;
 /// The level's panes of glass, <c>GlassContainer</c> (glasscontainer.c): each by its key, run each tick so a broken pane leaves the
 /// world (<c>GlassContainer_RunHandler</c>), written to a save game one line a pane, and put back as a save game says.
 /// </summary>
-public sealed class Igi2GlassContainer
+public sealed class Igi2GlassContainer : IPlacementGlass
 {
     /// <summary>The call a pane is written as, <c>%s("%s", %d);</c>.</summary>
     public const string Call = "GlassContainer";

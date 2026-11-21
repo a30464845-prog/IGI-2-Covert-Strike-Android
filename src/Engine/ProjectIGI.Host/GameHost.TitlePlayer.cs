@@ -125,6 +125,7 @@ public sealed partial class GameHost
         _world?.Motions = player.Motions;
         _world?.Destruction = player.Destruction;
         _world?.Presence = player.Presence;
+        _world?.Glass = player.Glass;
         if (player.Visibility is { } visibility)
         {
             _world?.Visibility = visibility;

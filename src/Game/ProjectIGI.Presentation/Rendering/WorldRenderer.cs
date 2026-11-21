@@ -153,6 +153,9 @@ public sealed partial class WorldRenderer : IWorldPresenter
     /// <inheritdoc/>
     public IPlacementPresence? Presence { get => _transforms.Presence; set => _transforms.Presence = value; }
 
+    /// <summary>Gets or sets the title's panes of glass, so a broken one leaves the frame.</summary>
+    public IPlacementGlass? Glass { get => _transforms.Glass; set => _transforms.Glass = value; }
+
     /// <inheritdoc/>
     public IPlacementVariant? Variants { get => _transforms.Variants; set => _transforms.Variants = value; }
 

@@ -41,6 +41,9 @@ internal sealed class WorldPlacementTransforms
     /// <summary>Gets or sets which placements a title's own level has in the world.</summary>
     internal IPlacementPresence? Presence { get; set; }
 
+    /// <summary>Gets or sets the title's panes of glass, so a broken one leaves the frame.</summary>
+    internal IPlacementGlass? Glass { get; set; }
+
     /// <summary>Gets or sets which variant each placement wears.</summary>
     internal IPlacementVariant? Variants { get; set; }
 

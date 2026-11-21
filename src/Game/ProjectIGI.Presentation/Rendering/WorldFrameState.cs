@@ -133,6 +133,7 @@ internal sealed class WorldFrameState
             if (GenericPickups?.IsCollected(authored.Owner) == true
                 || !ConditionalContainerGate.IsTaskActive(authored.Owner)
                 || _transforms.Presence?.IsInWorld(authored) == false
+                || _transforms.Glass?.IsGone(authored.LevelId, WorldScene.ToUnits(authored.Position)) == true
                 || Visibility?.IsVisible(authored) == false)
             {
                 entry.Skip = true;

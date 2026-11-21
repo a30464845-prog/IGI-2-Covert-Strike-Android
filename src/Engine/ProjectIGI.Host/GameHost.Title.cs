@@ -14,6 +14,7 @@ using ProjectIGI.Frontend;
 using ProjectIGI.Frontend.Saves;
 using ProjectIGI.Game;
 using ProjectIGI.Game.Config;
+using ProjectIGI.Game.Hosting;
 using ProjectIGI.Game.Player;
 using ProjectIGI.Game.World;
 using ProjectIGI.Host.Audio;
@@ -318,6 +319,7 @@ public sealed partial class GameHost
         hostServices.Provide<ITitleDataLocator>(new InstalledTitles(_titles));
         hostServices.Provide<ITitleAudioMixer>(new GuestAudioMixer(_audioOut, _logger));
         hostServices.Provide(new PlayedMods(_titleRuntime.Mods));
+        hostServices.Provide<IBlastEffectsHost>(_missionHost);
         _title = TitleSession.Start(
             _titleRuntime.Modules, _loop, _fileSystem, _resources, _logger, loadTables: false, inherited: hostServices);
         LoadModPostPasses();

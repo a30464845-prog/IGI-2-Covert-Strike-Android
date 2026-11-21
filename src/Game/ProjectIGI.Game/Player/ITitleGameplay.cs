@@ -150,6 +150,9 @@ public interface ITitlePlayer
     /// <summary>Gets which of the title's own placements are in the world, or <see langword="null"/> when all of them always are.</summary>
     IPlacementPresence? Presence => null;
 
+    /// <summary>Gets the title's panes of glass, or <see langword="null"/> when it hangs none.</summary>
+    IPlacementGlass? Glass => null;
+
     /// <summary>
     /// Gets the title's own view culling -- what the eye's place in the level leaves out of the frame -- or <see langword="null"/>
     /// when the renderer's frustum and occlusion are all there is.
