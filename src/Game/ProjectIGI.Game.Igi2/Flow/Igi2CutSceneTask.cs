@@ -398,7 +398,7 @@ public sealed partial class Igi2CutSceneTask : Igi2Task
         {
             if (changed || from.UpdateLinkContinuously)
             {
-                if ((uint)from.LinkTaskId < LevelIds && Tree.FromId(from.LinkTaskId) is IIgi2CameraTarget link)
+                if (Igi2CutsceneCameras.ResolveTarget((uint)from.LinkTaskId < LevelIds ? Tree.FromId(from.LinkTaskId) : null) is IIgi2CameraTarget link)
                 {
                     Igi2CutsceneCameras.TransformRelativeToLink(ref position, frame, from.LinkedPosition, from.LinkedOrientation, link);
                 }
@@ -415,7 +415,7 @@ public sealed partial class Igi2CutSceneTask : Igi2Task
         {
             if (changed || from.UpdateTargetContinuously)
             {
-                if ((uint)from.TargetTaskId < LevelIds && Tree.FromId(from.TargetTaskId) is IIgi2CameraTarget target)
+                if (Igi2CutsceneCameras.ResolveTarget((uint)from.TargetTaskId < LevelIds ? Tree.FromId(from.TargetTaskId) : null) is IIgi2CameraTarget target)
                 {
                     frame = Igi2CutsceneCameras.FollowTarget(position, target.CameraTargetPosition);
                 }

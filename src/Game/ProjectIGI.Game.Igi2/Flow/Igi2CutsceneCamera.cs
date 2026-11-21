@@ -1,4 +1,7 @@
 using ProjectIGI.Core.Numerics;
+using ProjectIGI.Engine.Tasks;
+using ProjectIGI.Game.Igi2.Ai;
+using ProjectIGI.Game.Igi2.Vehicles;
 using ProjectIGI.Game.Igi2.World;
 
 namespace ProjectIGI.Game.Igi2.Flow;
@@ -236,6 +239,33 @@ public static class Igi2CutsceneCameras
     }
 
     /// <summary>
+    /// Where a task stands for a cutscene camera, as it answers <c>GetCameraTargetInfo</c>: a task that is a camera target
+    /// itself; else a soldier by its body's live position, a car or a train by its live position, else any task that declares
+    /// a <c>Position</c> parameter, at the position level data gave it.
+    /// </summary>
+    /// <remarks>
+    /// The cutscene's own look asked only the first of these, <c>Tree.FromId(id) is IIgi2CameraTarget</c>, which only a
+    /// placed prop and a spline path node answer -- so a camera whose target is a soldier, the player, a car or a train
+    /// looked at nothing and played its authored angles instead. The map computer (<c>Igi2ComputerMapWorld.Task</c>) and
+    /// the minefield (<c>Igi2MineFieldTask.TargetPosition</c>) already resolve the same question this way; this is that
+    /// resolution for the cutscene's cameras, at their link and at their target alike.
+    /// </remarks>
+    /// <param name="task">The task a camera names, or <see langword="null"/>.</param>
+    /// <returns>What the camera follows, or <see langword="null"/> when the task stands for nothing.</returns>
+    public static IIgi2CameraTarget? ResolveTarget(object? task) => task switch
+    {
+        IIgi2CameraTarget target => target,
+        Igi2HumanSoldierTask soldier => new LiveTarget(
+            () => soldier.Body?.Position ?? soldier.Position,
+            () => Rows(soldier.Body?.Orientation ?? Matrix3f.Identity)),
+        Igi2CarTask car => new LiveTarget(() => car.CurrentPosition, () => car.CurrentOrientation),
+        Igi2TrainTask train => new LiveTarget(() => train.CurrentPosition, () => train.CurrentOrientation),
+        GameTask named when named.TryGetScriptValue("Position", out object? value) && value is Vector3d position
+            => new LiveTarget(() => position, static () => IdentityOrientation),
+        _ => null,
+    };
+
+    /// <summary>
     /// The frame turned by a shake, <c>Real32x9_Multiply</c> inline in <c>CutScene_InterpolateCamera</c> (<c>igi2 0x4398C5</c>):
     /// each element summed over its three products last to first, but the middle and bottom rows' last element first, last,
     /// then the middle.
@@ -274,5 +304,21 @@ public static class Igi2CutsceneCameras
         x = ((Fpu)x * inverse).F;
         y = ((Fpu)y * inverse).F;
         z = ((Fpu)z * inverse).F;
+    }
+
+    // The frame of no turn, for a target whose orientation a camera never reads: the look-at takes only its position.
+    private static readonly float[] IdentityOrientation = [1f, 0f, 0f, 0f, 1f, 0f, 0f, 0f, 1f];
+
+    // A body's orientation as the nine floats a camera target's frame is: its rows, in order.
+    private static float[] Rows(Matrix3f orientation) =>
+        [orientation.M11, orientation.M12, orientation.M13, orientation.M21, orientation.M22, orientation.M23,
+            orientation.M31, orientation.M32, orientation.M33];
+
+    // Where something stands for a camera, read live each time it is asked: its position, and its frame for a link.
+    private sealed class LiveTarget(Func<Vector3d> position, Func<IReadOnlyList<float>> orientation) : IIgi2CameraTarget
+    {
+        public Vector3d CameraTargetPosition => position();
+
+        public IReadOnlyList<float> CameraTargetOrientation => orientation();
     }
 }

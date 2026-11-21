@@ -139,7 +139,7 @@ internal static class Igi2WorldSystems
 
         foreach (Igi2EditCameraTask camera in b.Root.Descendants().OfType<Igi2EditCameraTask>().Where(static c => c.LinkTaskId >= 0))
         {
-            camera.NoteLink(linkable.GetValueOrDefault(camera.LinkTaskId));
+            camera.NoteLink(Igi2CutsceneCameras.ResolveTarget(linkable.GetValueOrDefault(camera.LinkTaskId)));
         }
     }
 
