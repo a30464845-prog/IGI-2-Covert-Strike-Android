@@ -18,7 +18,7 @@ public sealed partial class GameHost
 {
     // The first-run benchmark (Ray: "benchmark testing with all of the settings rolling as soon as
     // the files are selected, and out of all, pick the best one and apply it, and then boot into the
-    // game ... users can perform it again via clicking the gear icon, in the cheats menu"), reworked
+    // game ... users can perform it again from the BENCHMARK button on the main menu"), reworked
     // into a visible, professional benchmark scene (Ray: "make it a professional benchmark, render
     // the weather station map in drone view, rotate it, with snow and players etc. ... let it
     // display aswell and not just run in the background").
@@ -39,8 +39,7 @@ public sealed partial class GameHost
     // FPS, which tier is being measured and what each finished tier scored; then a RESULTS screen
     // with the per-tier numbers and the tier picked, and a choice -- apply it and continue to the
     // menu, or keep the settings as they were. The run is also written down: r_benchmark_last
-    // (date, tier, per-tier 1% low) survives in settings.cfg and is shown on the cheats menu's
-    // BENCHMARK row, and the per-tier lines go to logcat as before.
+    // (date, tier, per-tier 1% low) survives in settings.cfg and is shown in the cheats modal's footer line, and the per-tier lines go to logcat as before.
     //
     // It cannot run in the file picker itself: no world is loaded there and no frame has been
     // drawn, so there is nothing to measure yet. The prompt asks on the first menu frames
@@ -224,9 +223,9 @@ public sealed partial class GameHost
             "First-run benchmark prompt armed: it asks on the first menu frame, unless the player dismissed it for good.");
     }
 
-    /// <summary>Starts a benchmark run over the Weather Station, from the first run or the cheats menu.</summary>
+    /// <summary>Starts a benchmark run over the Weather Station, from the first run or the main-menu BENCHMARK button.</summary>
     /// <param name="state">The frame loop's state, for the console that saves the result and the loader that builds the station.</param>
-    /// <param name="manual">Whether the run was asked for from the cheats menu.</param>
+    /// <param name="manual">Whether the run was asked for from the main-menu BENCHMARK button.</param>
     /// <remarks>
     /// The run flies over mission 13 whatever the menu was showing: the station is asked for here
     /// (superseding whatever backdrop was building) and the run waits for it in
@@ -274,7 +273,7 @@ public sealed partial class GameHost
         _benchmarkManual = manual;
         _benchmarkOverShell = _menuFlow.OverShowcase;
 
-        // A run starting -- from the prompt or the cheats menu -- answers the prompt for this
+        // A run starting -- from the prompt or the main-menu BENCHMARK button -- answers the prompt for this
         // launch: it must not come back over the run's own results, or after it ends.
         _benchmarkPromptArmed = false;
         _benchmarkPromptUp = false;
@@ -321,7 +320,7 @@ public sealed partial class GameHost
         _logger.Information(
             "Benchmark",
             manual
-                ? "Benchmark started from the cheats menu: measuring High, Medium, Low over the Weather Station."
+                ? "Benchmark started from the main menu: measuring High, Medium, Low over the Weather Station."
                 : "First-run benchmark started: measuring High, Medium, Low over the Weather Station.");
     }
 
@@ -966,9 +965,11 @@ public sealed partial class GameHost
 
     private static UiRect BenchmarkSkipRect(float width, float height, float scale)
     {
-        float bandH = 48f * scale;
+        // The SKIP band is 64 units tall so its 48 dp button (56 units at 1080p)
+        // fits inside it with room on both sides.
+        float bandH = 64f * scale;
         float btnW = 150f * scale;
-        float btnH = 34f * scale;
+        float btnH = 56f * scale;
         float btnX = width - btnW - (16f * scale);
         float btnY = height - bandH + ((bandH - btnH) * 0.5f);
         return new UiRect(btnX, btnY, btnW, btnH);
@@ -984,7 +985,7 @@ public sealed partial class GameHost
     private static UiRect BenchmarkResultsApplyRect(float width, float height, float scale)
     {
         UiRect panel = BenchmarkResultsPanel(width, height, scale);
-        float btnH = 36f * scale;
+        float btnH = 56f * scale;
         float btnW = (panel.Width - (60f * scale)) * 0.55f;
         float btnY = panel.Y + panel.Height - btnH - (16f * scale);
         return new UiRect(panel.X + (20f * scale), btnY, btnW, btnH);
@@ -993,7 +994,7 @@ public sealed partial class GameHost
     private static UiRect BenchmarkResultsKeepRect(float width, float height, float scale)
     {
         UiRect panel = BenchmarkResultsPanel(width, height, scale);
-        float btnH = 36f * scale;
+        float btnH = 56f * scale;
         float btnW = (panel.Width - (60f * scale)) * 0.45f - (12f * scale);
         float btnY = panel.Y + panel.Height - btnH - (16f * scale);
         return new UiRect(panel.X + panel.Width - btnW - (20f * scale), btnY, btnW, btnH);
@@ -1009,7 +1010,7 @@ public sealed partial class GameHost
     private static UiRect BenchmarkPromptYesRect(float width, float height, float scale)
     {
         UiRect panel = BenchmarkPromptPanel(width, height, scale);
-        float btnH = 36f * scale;
+        float btnH = 56f * scale;
         float btnW = (panel.Width - (60f * scale)) * 0.40f;
         float btnY = panel.Y + panel.Height - btnH - (16f * scale);
         return new UiRect(panel.X + (20f * scale), btnY, btnW, btnH);
@@ -1018,7 +1019,7 @@ public sealed partial class GameHost
     private static UiRect BenchmarkPromptDismissRect(float width, float height, float scale)
     {
         UiRect panel = BenchmarkPromptPanel(width, height, scale);
-        float btnH = 36f * scale;
+        float btnH = 56f * scale;
         float btnW = (panel.Width - (60f * scale)) * 0.60f - (12f * scale);
         float btnY = panel.Y + panel.Height - btnH - (16f * scale);
         return new UiRect(panel.X + panel.Width - btnW - (20f * scale), btnY, btnW, btnH);
@@ -1093,7 +1094,9 @@ public sealed partial class GameHost
         var painter = UiPainter.Create(state.Batch, new LayoutContext(SafeWindowWidth, SafeWindowHeight));
 
         Bgra32 accent = Bgra32.FromRgb(80, 160, 255);
-        Bgra32 panelBg = Bgra32.FromRgba(8, 14, 28, 252);
+        Bgra32 panelBg = Bgra32.FromRgb(8, 16, 30);
+        Bgra32 textPrimary = Bgra32.FromRgb(235, 242, 250);
+        Bgra32 textSecondary = Bgra32.FromRgb(150, 175, 190);
 
         painter.FillRect(new UiRect(0f, 0f, width, height), Bgra32.FromRgba(0, 0, 0, 120));
 
@@ -1102,38 +1105,38 @@ public sealed partial class GameHost
         painter.StrokeRect(panel, 1.5f * scale, accent);
 
         float x = panel.X + (20f * scale);
-        painter.DrawText(type.Heading, "BENCHMARK THIS DEVICE?", new UiVec2(x, panel.Y + (16f * scale)), 20f * scale, Bgra32.White);
+        painter.DrawText(type.Heading, "BENCHMARK THIS DEVICE?", new UiVec2(x, panel.Y + (16f * scale)), 20f * scale, textPrimary);
 
         float lineY = panel.Y + (48f * scale);
         float lineH = 18f * scale;
-        Bgra32 body = Bgra32.FromRgb(150, 180, 220);
+        Bgra32 body = textSecondary;
         painter.DrawText(type.Mono, "MEASURES THIS DEVICE OVER THE WEATHER STATION AND PICKS", new UiVec2(x, lineY), 12f * scale, body);
         painter.DrawText(type.Mono, "THE BEST GRAPHICS SETTINGS FOR IT. TAKES ABOUT A MINUTE.", new UiVec2(x, lineY + lineH), 12f * scale, body);
         painter.DrawText(type.Mono, "THE DECIDED SETTINGS ARE APPLIED TO THE GRAPHICS MENU.", new UiVec2(x, lineY + (2f * lineH)), 12f * scale, body);
-        painter.DrawText(type.Mono, "YOU CAN RUN IT AGAIN ANY TIME FROM THE CHEATS MENU.", new UiVec2(x, lineY + (3f * lineH)), 12f * scale, body);
+        painter.DrawText(type.Mono, "YOU CAN RUN IT AGAIN ANY TIME FROM THE MAIN MENU.", new UiVec2(x, lineY + (3f * lineH)), 12f * scale, body);
 
         UiRect yes = BenchmarkPromptYesRect(width, height, scale);
-        painter.FillRect(yes, Bgra32.FromRgba(25, 32, 50, 200));
+        painter.FillRect(yes, Bgra32.FromRgb(25, 32, 50));
         painter.StrokeRect(yes, 1.5f * scale, accent);
         UiVec2 yesExtent = type.Mono.Measure("YES", 12f * scale);
         painter.DrawText(
             type.Mono,
             "YES",
-            new UiVec2(yes.X + ((yes.Width - yesExtent.X) * 0.5f), yes.Y + (11f * scale)),
+            new UiVec2(yes.X + ((yes.Width - yesExtent.X) * 0.5f), yes.Y + ((yes.Height - yesExtent.Y) * 0.5f)),
             12f * scale,
-            Bgra32.White);
+            textPrimary);
 
         UiRect dismiss = BenchmarkPromptDismissRect(width, height, scale);
-        painter.FillRect(dismiss, Bgra32.FromRgba(25, 32, 50, 200));
+        painter.FillRect(dismiss, Bgra32.FromRgb(25, 32, 50));
         painter.StrokeRect(dismiss, 1.5f * scale, Bgra32.FromRgb(70, 100, 140));
         string dismissText = "YES (DONT SHOW IT AGAIN)";
         UiVec2 dismissExtent = type.Mono.Measure(dismissText, 12f * scale);
         painter.DrawText(
             type.Mono,
             dismissText,
-            new UiVec2(dismiss.X + ((dismiss.Width - dismissExtent.X) * 0.5f), dismiss.Y + (11f * scale)),
+            new UiVec2(dismiss.X + ((dismiss.Width - dismissExtent.X) * 0.5f), dismiss.Y + ((dismiss.Height - dismissExtent.Y) * 0.5f)),
             12f * scale,
-            Bgra32.White);
+            textPrimary);
 
         state.Batch.End();
         _device.EndStageTiming();
@@ -1141,8 +1144,11 @@ public sealed partial class GameHost
 
     private void DrawBenchmarkHud(FrameLoopState state, UiPainter painter, IgiTypography type, float width, float height, float scale)
     {
-        Bgra32 brightGreen = Bgra32.FromRgb(80, 160, 255);
-        Bgra32 panelBg = Bgra32.FromRgba(8, 14, 28, 252);
+        Bgra32 accent = Bgra32.FromRgb(80, 160, 255);
+        Bgra32 success = Bgra32.FromRgb(80, 200, 120);
+        Bgra32 panelBg = Bgra32.FromRgb(8, 16, 30);
+        Bgra32 textPrimary = Bgra32.FromRgb(235, 242, 250);
+        Bgra32 textSecondary = Bgra32.FromRgb(150, 175, 190);
         int now = _loop.TimeSource.Milliseconds;
         double liveFps = state.FramePerformance.Statistics().FramesPerSecond;
 
@@ -1150,7 +1156,8 @@ public sealed partial class GameHost
         // number that proves the test is running rather than a still.
         float stripH = 56f * scale;
         painter.FillRect(new UiRect(0f, 0f, width, stripH), panelBg);
-        painter.DrawText(type.Heading, "BENCHMARK - THE WEATHER STATION", new UiVec2(16f * scale, 12f * scale), 18f * scale, Bgra32.White);
+        painter.FillRect(new UiRect(0f, stripH, width, 1.5f * scale), accent);
+        painter.DrawText(type.Heading, "BENCHMARK - THE WEATHER STATION", new UiVec2(16f * scale, 12f * scale), 18f * scale, textPrimary);
 
         // Before the station is up there is nothing to count or describe yet: the line says
         // the run is loading, not that the level authors no weather and stations no soldiers.
@@ -1162,11 +1169,11 @@ public sealed partial class GameHost
             sceneLine,
             new UiVec2(16f * scale, 36f * scale),
             12f * scale,
-            Bgra32.FromRgb(150, 180, 220));
+            textSecondary);
 
         string fpsText = FormattableString.Invariant($"{liveFps:0} FPS");
         UiVec2 fpsExtent = type.Mono.Measure(fpsText, 26f * scale);
-        painter.DrawText(type.Mono, fpsText, new UiVec2(width - fpsExtent.X - (16f * scale), 13f * scale), 26f * scale, brightGreen);
+        painter.DrawText(type.Mono, fpsText, new UiVec2(width - fpsExtent.X - (16f * scale), 13f * scale), 26f * scale, accent);
 
         // Bottom panel: the status line, one row per tier, the progress bar and SKIP.
         float panelY = height - (BenchmarkHudHeight * scale);
@@ -1178,7 +1185,7 @@ public sealed partial class GameHost
             + (BenchmarkTierOrder.Length * (BenchmarkWarmUpMilliseconds + BenchmarkMeasureMilliseconds));
         float progress = Math.Clamp((now - _benchmarkStartedMs) / (float)totalMs, 0f, 1f);
         painter.FillRect(new UiRect(0f, panelY, width, 1.5f * scale), Bgra32.FromRgb(40, 70, 110));
-        painter.FillRect(new UiRect(0f, panelY, width * progress, 3f * scale), brightGreen);
+        painter.FillRect(new UiRect(0f, panelY, width * progress, 3f * scale), accent);
 
         int secondsLeft = BenchmarkSecondsLeft(now);
         string status = _benchmarkPhase switch
@@ -1191,7 +1198,7 @@ public sealed partial class GameHost
                 $"TESTING {BenchmarkTierOrder[_benchmarkTierIndex]} ({_benchmarkTierIndex + 1} OF {BenchmarkTierOrder.Length})... UP TO {secondsLeft}s LEFT"),
             _ => "BENCHMARK",
         };
-        painter.DrawText(type.Heading, status, new UiVec2(16f * scale, panelY + (10f * scale)), 14f * scale, Bgra32.White);
+        painter.DrawText(type.Heading, status, new UiVec2(16f * scale, panelY + (10f * scale)), 14f * scale, textPrimary);
 
         float rowY = panelY + (34f * scale);
         float rowH = 26f * scale;
@@ -1218,44 +1225,48 @@ public sealed partial class GameHost
                 tierStatus = "QUEUED";
             }
 
-            Bgra32 tierColour = tierStatus.StartsWith("PASS", StringComparison.Ordinal) ? brightGreen : Bgra32.White;
-            painter.DrawText(type.Mono, tier.ToString().ToUpperInvariant(), new UiVec2(16f * scale, rowY + (i * rowH)), 13f * scale, Bgra32.FromRgb(150, 180, 220));
+            Bgra32 tierColour = tierStatus.StartsWith("PASS", StringComparison.Ordinal) ? success : textPrimary;
+            painter.DrawText(type.Mono, tier.ToString().ToUpperInvariant(), new UiVec2(16f * scale, rowY + (i * rowH)), 13f * scale, textSecondary);
             painter.DrawText(type.Mono, tierStatus, new UiVec2(110f * scale, rowY + (i * rowH)), 13f * scale, tierColour);
         }
 
         UiRect skip = BenchmarkSkipRect(width, height, scale);
-        painter.FillRect(skip, Bgra32.FromRgba(25, 32, 50, 200));
-        painter.StrokeRect(skip, 1.5f * scale, brightGreen);
+        painter.FillRect(skip, Bgra32.FromRgb(25, 32, 50));
+        painter.StrokeRect(skip, 1.5f * scale, accent);
         string skipText = "[ SKIP ]";
         UiVec2 extent = type.Mono.Measure(skipText, 14f * scale);
         painter.DrawText(
             type.Mono,
             skipText,
-            new UiVec2(skip.X + ((skip.Width - extent.X) * 0.5f), skip.Y + (9f * scale)),
+            new UiVec2(skip.X + ((skip.Width - extent.X) * 0.5f), skip.Y + ((skip.Height - extent.Y) * 0.5f)),
             14f * scale,
-            Bgra32.White);
+            textPrimary);
     }
 
     private void DrawBenchmarkResults(UiPainter painter, IgiTypography type, float width, float height, float scale)
     {
-        Bgra32 brightGreen = Bgra32.FromRgb(80, 160, 255);
-        Bgra32 panelBg = Bgra32.FromRgba(8, 14, 28, 252);
+        Bgra32 accent = Bgra32.FromRgb(80, 160, 255);
+        Bgra32 success = Bgra32.FromRgb(80, 200, 120);
+        Bgra32 danger = Bgra32.FromRgb(255, 95, 80);
+        Bgra32 panelBg = Bgra32.FromRgb(8, 16, 30);
+        Bgra32 textPrimary = Bgra32.FromRgb(235, 242, 250);
+        Bgra32 textSecondary = Bgra32.FromRgb(150, 175, 190);
 
         // Dimmed, not blacked out: the drone view keeps orbiting behind the panel.
         painter.FillRect(new UiRect(0f, 0f, width, height), Bgra32.FromRgba(0, 0, 0, 120));
 
         UiRect panel = BenchmarkResultsPanel(width, height, scale);
         painter.FillRect(panel, panelBg);
-        painter.StrokeRect(panel, 1.5f * scale, brightGreen);
+        painter.StrokeRect(panel, 1.5f * scale, accent);
 
         float x = panel.X + (20f * scale);
-        painter.DrawText(type.Heading, "BENCHMARK COMPLETE", new UiVec2(x, panel.Y + (16f * scale)), 20f * scale, Bgra32.White);
+        painter.DrawText(type.Heading, "BENCHMARK COMPLETE", new UiVec2(x, panel.Y + (16f * scale)), 20f * scale, textPrimary);
         painter.DrawText(
             type.Mono,
             FormattableString.Invariant($"THE WEATHER STATION - DRONE VIEW - {_benchmarkSoldierCount} SOLDIERS - {BenchmarkWeatherText().ToUpperInvariant()}"),
             new UiVec2(x, panel.Y + (44f * scale)),
             12f * scale,
-            Bgra32.FromRgb(150, 180, 220));
+            textSecondary);
 
         float rowY = panel.Y + (72f * scale);
         float rowH = 40f * scale;
@@ -1266,17 +1277,17 @@ public sealed partial class GameHost
             bool isWinner = tier == _benchmarkWinner;
             if (isWinner)
             {
-                painter.FillRect(new UiRect(panel.X + (8f * scale), y, panel.Width - (16f * scale), rowH - (6f * scale)), Bgra32.FromRgba(40, 90, 140, 110));
-                painter.FillRect(new UiRect(panel.X + (8f * scale), y, 4f * scale, rowH - (6f * scale)), brightGreen);
+                painter.FillRect(new UiRect(panel.X + (8f * scale), y, panel.Width - (16f * scale), rowH - (6f * scale)), Bgra32.FromRgb(40, 90, 140));
+                painter.FillRect(new UiRect(panel.X + (8f * scale), y, 4f * scale, rowH - (6f * scale)), accent);
             }
 
             string name = isWinner ? $"{tier.ToString().ToUpperInvariant()} - BEST" : tier.ToString().ToUpperInvariant();
-            painter.DrawText(type.Mono, name, new UiVec2(x, y + (4f * scale)), 14f * scale, Bgra32.White);
+            painter.DrawText(type.Mono, name, new UiVec2(x, y + (4f * scale)), 14f * scale, textPrimary);
 
             if (_benchmarkResults.FirstOrDefault(result => result.Tier == tier) is { } done)
             {
                 string numbers = FormattableString.Invariant($"mean {done.MeanFps:0.0}  1% low {done.OnePercentLowFps:0.0}  {done.Samples} frames");
-                painter.DrawText(type.Mono, numbers, new UiVec2(x, y + (22f * scale)), 12f * scale, Bgra32.FromRgb(150, 180, 220));
+                painter.DrawText(type.Mono, numbers, new UiVec2(x, y + (22f * scale)), 12f * scale, textSecondary);
                 string verdict = done.OnePercentLowFps >= BenchmarkPassOnePercentLowFps ? "PASS" : "BELOW 30";
                 UiVec2 verdictExtent = type.Mono.Measure(verdict, 13f * scale);
                 painter.DrawText(
@@ -1284,14 +1295,14 @@ public sealed partial class GameHost
                     verdict,
                     new UiVec2(panel.X + panel.Width - verdictExtent.X - (20f * scale), y + (10f * scale)),
                     13f * scale,
-                    verdict == "PASS" ? brightGreen : Bgra32.FromRgb(255, 120, 90));
+                    verdict == "PASS" ? success : danger);
             }
             else
             {
-                painter.DrawText(type.Mono, "not measured - a higher tier already held 30 FPS", new UiVec2(x, y + (22f * scale)), 12f * scale, Bgra32.FromRgb(150, 180, 220));
+                painter.DrawText(type.Mono, "not measured - a higher tier already held 30 FPS", new UiVec2(x, y + (22f * scale)), 12f * scale, textSecondary);
                 string verdict = "-";
                 UiVec2 verdictExtent = type.Mono.Measure(verdict, 13f * scale);
-                painter.DrawText(type.Mono, verdict, new UiVec2(panel.X + panel.Width - verdictExtent.X - (20f * scale), y + (10f * scale)), 13f * scale, Bgra32.FromRgb(150, 180, 220));
+                painter.DrawText(type.Mono, verdict, new UiVec2(panel.X + panel.Width - verdictExtent.X - (20f * scale), y + (10f * scale)), 13f * scale, textSecondary);
             }
         }
 
@@ -1301,31 +1312,31 @@ public sealed partial class GameHost
             $"BEST FOR THIS DEVICE: {_benchmarkWinner.ToString().ToUpperInvariant()}",
             new UiVec2(x, winnerY),
             15f * scale,
-            brightGreen);
-        painter.DrawText(type.Mono, HardwareTiering.Describe(_benchmarkWinner), new UiVec2(x, winnerY + (22f * scale)), 12f * scale, Bgra32.White);
+            accent);
+        painter.DrawText(type.Mono, HardwareTiering.Describe(_benchmarkWinner), new UiVec2(x, winnerY + (22f * scale)), 12f * scale, textPrimary);
 
         UiRect apply = BenchmarkResultsApplyRect(width, height, scale);
-        painter.FillRect(apply, Bgra32.FromRgba(25, 32, 50, 200));
-        painter.StrokeRect(apply, 1.5f * scale, brightGreen);
+        painter.FillRect(apply, Bgra32.FromRgb(25, 32, 50));
+        painter.StrokeRect(apply, 1.5f * scale, accent);
         string applyText = $"APPLY {_benchmarkWinner.ToString().ToUpperInvariant()} & CONTINUE";
         UiVec2 applyExtent = type.Mono.Measure(applyText, 12f * scale);
         painter.DrawText(
             type.Mono,
             applyText,
-            new UiVec2(apply.X + ((apply.Width - applyExtent.X) * 0.5f), apply.Y + (11f * scale)),
+            new UiVec2(apply.X + ((apply.Width - applyExtent.X) * 0.5f), apply.Y + ((apply.Height - applyExtent.Y) * 0.5f)),
             12f * scale,
-            Bgra32.White);
+            textPrimary);
 
         UiRect keep = BenchmarkResultsKeepRect(width, height, scale);
-        painter.FillRect(keep, Bgra32.FromRgba(25, 32, 50, 200));
+        painter.FillRect(keep, Bgra32.FromRgb(25, 32, 50));
         painter.StrokeRect(keep, 1.5f * scale, Bgra32.FromRgb(70, 100, 140));
         string keepText = "KEEP MY SETTINGS";
         UiVec2 keepExtent = type.Mono.Measure(keepText, 12f * scale);
         painter.DrawText(
             type.Mono,
             keepText,
-            new UiVec2(keep.X + ((keep.Width - keepExtent.X) * 0.5f), keep.Y + (11f * scale)),
+            new UiVec2(keep.X + ((keep.Width - keepExtent.X) * 0.5f), keep.Y + ((keep.Height - keepExtent.Y) * 0.5f)),
             12f * scale,
-            Bgra32.White);
+            textPrimary);
     }
 }
