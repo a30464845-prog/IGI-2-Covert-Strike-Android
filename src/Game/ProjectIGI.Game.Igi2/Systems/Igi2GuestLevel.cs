@@ -482,6 +482,17 @@ public sealed class Igi2GuestLevel
                 surroundings.Particles = particles;
             }
         }
+        if (_player?.Weapons?.ImpactEffects is Igi2LevelImpactEffects playerImpacts)
+        {
+            playerImpacts.Particles = particles;
+        }
+        foreach (Soldiers.Igi2HumanSoldier body in soldiers.Bodies)
+        {
+            if (body.Weapon is Igi2PlayerWeapons arms && arms.ImpactEffects is Igi2LevelImpactEffects impacts)
+            {
+                impacts.Particles = particles;
+            }
+        }
 
         // A soldier out of the world -- held by its host's container, or a generator's life not yet spawned -- is struck by no blast.
         // And one whose mind has no graph of the host's to stand it on finds the host's ground by casting, as a body does.
@@ -612,7 +623,7 @@ public sealed class Igi2GuestLevel
                 {
                     Weapons.Igi2StationaryGunTask armed = gun;
                     firing.Effects = new Igi2LevelWeaponEffects(sounds, () => armed.Mount, ai);
-                    firing.ImpactEffects = new Igi2LevelImpactEffects(sounds, ai) { Explosions = explosions };
+                    firing.ImpactEffects = new Igi2LevelImpactEffects(sounds, ai) { Explosions = explosions, Particles = particles };
                     firing.World = new Igi2LevelGunShotWorld(start.World, materials, ai);
                 }
 
