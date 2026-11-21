@@ -61,8 +61,8 @@ public static class UiPalette
     /// <summary>Something that cannot be used: <c>#344F30</c>.</summary>
     public static Bgra32 TextDisabled => Bgra32.FromRgb(75, 100, 135);
 
-    /// <summary>Success, ready, a fix: <c>#4EFF78</c>.</summary>
-    public static Bgra32 Success => Bgra32.FromRgb(80, 160, 255);
+    /// <summary>Success, ready, a fix: <c>#50C878</c>.</summary>
+    public static Bgra32 Success => Bgra32.FromRgb(80, 200, 120);
 
     /// <summary>Information, a plugin, a change: <c>#72C2FF</c>.</summary>
     public static Bgra32 Info => Bgra32.FromRgb(114, 194, 255);
