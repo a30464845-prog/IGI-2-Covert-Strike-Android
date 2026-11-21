@@ -143,6 +143,9 @@ public interface IWorldPresenter : IDisposable
     /// <summary>Gets or sets the level's alarm speakers, or null when it has none.</summary>
     AlarmSpeakerRegistry? AlarmSpeakers { get; set; }
 
+    /// <summary>Gets or sets the level's glass panes, or null when it has none.</summary>
+    IPlacementGlass? Glass { get; set; }
+
     /// <summary>Gets or sets the level's destructible objects, or null when it has none.</summary>
     DestructibleObjectRegistry? Destructibles { get; set; }
 
