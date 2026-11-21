@@ -51,19 +51,19 @@ public static class HardwareTiering
                 RenderScaleMode: 0,
                 RenderScaleHeight: 540,
                 TextureQuality: 0,
-                ViewDistance: 0.025f,
+                ViewDistance: 0.5f,
                 FrameLimit: 0),
             [HardwareTier.Medium] = new(
                 RenderScaleMode: 1,
                 RenderScaleHeight: 720,
                 TextureQuality: 1,
-                ViewDistance: 1.0f,
+                ViewDistance: 0.5f,
                 FrameLimit: 0),
             [HardwareTier.High] = new(
                 RenderScaleMode: 2,
                 RenderScaleHeight: 900,
                 TextureQuality: 2,
-                ViewDistance: 1.0f,
+                ViewDistance: 0.5f,
                 FrameLimit: 0),
         };
 
@@ -125,7 +125,7 @@ public static class HardwareTiering
             2 => "high",
             _ => "medium",
         };
-        string viewDistance = values.ViewDistance <= 0.025f ? "near" : "far";
+        string viewDistance = values.ViewDistance <= 0.025f ? "near" : values.ViewDistance <= 0.5f ? "50%" : "far";
         return $"{values.RenderScaleHeight}p, textures {textures}, view distance {viewDistance}";
     }
 
