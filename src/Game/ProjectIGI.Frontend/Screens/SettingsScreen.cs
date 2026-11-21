@@ -12,52 +12,102 @@ using ProjectIGI.UI.Widgets;
 namespace ProjectIGI.Frontend.Screens;
 
 /// <summary>
-/// Authentic Project I.G.I. 1 "Configuration" screen:
-/// Stripped of all unnecessary modifications, providing ONLY the requested options:
-/// 1. Touch controls customization (drag-and-drop position, pinch-and-zoom resize, size +/-)
-/// 2. Controls alpha slider
-/// 3. Max frame rate (FPS cap: 30, 60, 90, 120, Uncapped)
-/// 4. Invert mouse/look pitch toggle
-/// 5. Graphics: resolution, frame rate, sun, smooth motion, FPS counter, texture sharpness and
-///    quality, mip blending, muzzle flash, weather and storm — every graphics option that actually
-///    changes the picture on the Android (vanilla) path. Impact effects and particles are not here:
-///    both are I.G.I. 1-only systems with no I.G.I. 2 input, so on this title they changed nothing.
+/// I.G.I. 2 "Configuration" screen, rebuilt as a section list with drill-down sub-screens:
+///
+///   Configuration (section list)
+///     Save game         (in-mission only; the mission's own save slots)
+///     Graphics          (frame rate, resolution, view distance, sun, smooth motion, FPS counter)
+///     Graphics quality  (texture sharpness, mip blending, texture quality, muzzle flash, weather, storm)
+///     Controls          (touch customizer, controls alpha/sensitivity, invert look, gyroscope)
+///     Crosshair         (size, colour, outline)
+///     Display &amp; readability (UI Size, Text Size)
+///
+/// Every setting the old flat list offered survives here with the same CVar binding and the same
+/// persistence (live write on change; OK calls SaveSettings + SaveProfiles). Nothing was dropped or
+/// re-defaulted; the rows only moved into sections. The old flat list is gone, not reskinned.
+///
+/// Navigation: one screen instance holds the section in a field and rebuilds its tree on section
+/// change (Screen.Invalidate), so the entry-time snapshots are taken once and shared by
+/// every sub-screen. Back — the top-left BACK button, the Cancel button, or the Android Back key — is
+/// Cancel everywhere in Configuration: it restores those snapshots and closes, never leaving dirty
+/// values behind. OK saves; on a sub-screen it saves and returns to the section list, on the list it
+/// saves and closes. SECTIONS (sub-screens only) returns to the list without saving or discarding, so
+/// live edits stay live until OK or Cancel settles them.
 /// </summary>
 public sealed class SettingsScreen : ShellScreen
 {
     private static readonly int[] FpsCapValues = [30, 60, 90, 120, 0];
     private static readonly string[] FpsCapLabels = ["30 FPS", "60 FPS", "90 FPS", "120 FPS", "UNCAPPED"];
-    private static readonly string[] RenderScaleLabels = ["540P (ULTRA)", "720P (PERFORMANCE)", "900P (BALANCED)", "NATIVE (MAX)"];
+    private static readonly string[] RenderScaleLabels = ["540P (FASTEST)", "720P (PERFORMANCE)", "900P (BALANCED)", "NATIVE (MAX)"];
     private static readonly float[] ViewDistanceValues = [1f, 0.5f, 0.1f, 0.025f];
     private static readonly string[] ViewDistanceLabels = ["FAR", "50%", "MEDIUM", "NEAR"];
     private static readonly int[] AnisotropyValues = [1, 4, 8, 16];
     private static readonly string[] AnisotropyLabels = ["OFF", "4X", "8X", "16X"];
     private static readonly string[] TextureQualityLabels = ["LOW", "MEDIUM", "HIGH"];
 
-    private readonly float _initialOpacity;
-    private readonly float _initialSensitivity;
-    private readonly int _initialFpsCap;
-    private readonly bool _initialInvert;
-    private readonly bool _initialGyro;
-    private readonly float _initialGyroSensitivity;
-    private readonly bool _initialInvertGyro;
-    private readonly float _initialUiScale;
-    private readonly float _initialTextScale;
-    private readonly int _initialRenderScale;
-    private readonly float _initialViewDistance;
-    private readonly bool _initialShowFps;
-    private readonly float _initialSunBrightness;
-    private readonly bool _initialSmooth;
-    private readonly int _initialAnisotropy;
-    private readonly bool _initialPointMips;
-    private readonly int _initialTextureQuality;
-    private readonly float _initialMuzzleFlash;
-    private readonly bool _initialWeather;
-    private readonly bool _initialStorm;
-    private readonly float _initialCrosshairScale;
-    private readonly int _initialCrosshairColor;
-    private readonly bool _initialCrosshairOutline;
+    // 48 dp in this screen's own units. The shell is authored at a 1920x1080 reference with
+    // GlobalUiScale 1.2, so at a 1080p-high display one design unit is 1.2 physical px; at a
+    // ~400 dpi phone (density ~2.625) that is ~0.46 dp per unit, and 48 dp is ~105 units.
+    // Every tappable control on this screen — section rows, setting rows, OK/Cancel, BACK,
+    // SECTIONS — is this tall, so no target is under the Android 48 dp floor.
+    private const float RowHeightUnits = 104f;
+    private const float RowWidthUnits = 1150f;
+    private const float SectionRowTextSize = 30f;
 
+    /// <summary>Which view of Configuration this screen is showing.</summary>
+    private enum Section
+    {
+        /// <summary>The section list.</summary>
+        List,
+
+        /// <summary>The mission's save slots (in-mission only).</summary>
+        SaveGame,
+
+        /// <summary>Frame rate, resolution, view distance, sun, smooth motion, FPS counter.</summary>
+        Graphics,
+
+        /// <summary>Texture sharpness, mip blending, texture quality, muzzle flash, weather, storm.</summary>
+        GraphicsQuality,
+
+        /// <summary>Touch customizer, controls alpha/sensitivity, invert look, gyroscope.</summary>
+        Controls,
+
+        /// <summary>Crosshair size, colour, outline.</summary>
+        Crosshair,
+
+        /// <summary>UI Size and Text Size.</summary>
+        Display,
+    }
+
+    // The entry-time snapshots Cancel restores. Not readonly: OK refreshes them to the just-saved
+    // values, so a Cancel after an OK reverts to the last saved state instead of silently undoing
+    // what OK just wrote to disk (the old code left the live values reverted while the file kept
+    // the saved ones — incoherent the moment OK and Cancel were used in one visit).
+    private float _initialOpacity;
+    private float _initialSensitivity;
+    private int _initialFpsCap;
+    private bool _initialInvert;
+    private bool _initialGyro;
+    private float _initialGyroSensitivity;
+    private bool _initialInvertGyro;
+    private float _initialUiScale;
+    private float _initialTextScale;
+    private int _initialRenderScale;
+    private float _initialViewDistance;
+    private bool _initialShowFps;
+    private float _initialSunBrightness;
+    private bool _initialSmooth;
+    private int _initialAnisotropy;
+    private bool _initialPointMips;
+    private int _initialTextureQuality;
+    private float _initialMuzzleFlash;
+    private bool _initialWeather;
+    private bool _initialStorm;
+    private float _initialCrosshairScale;
+    private int _initialCrosshairColor;
+    private bool _initialCrosshairOutline;
+
+    private Section _section = Section.List;
     private ScrollView? _scroll;
     private UiVec2? _touchDragStart;
     private float _touchDragStartOffset;
@@ -69,16 +119,22 @@ public sealed class SettingsScreen : ShellScreen
     public SettingsScreen(ShellContext context)
         : base(context)
     {
-        _initialOpacity = context.Host.TouchOpacity;
-        _initialSensitivity = context.Host.TouchSensitivity;
+        CaptureSnapshots();
+    }
+
+    /// <summary>Reads every live value into the snapshots Cancel restores.</summary>
+    private void CaptureSnapshots()
+    {
+        _initialOpacity = Context.Host.TouchOpacity;
+        _initialSensitivity = Context.Host.TouchSensitivity;
         _initialFpsCap = ReconstructionCVars.FrameLimit.Value;
-        _initialInvert = context.Config.Active?.InvertMouse ?? false;
-        _initialGyro = context.Config.Active?.GyroEnabled ?? false;
-        _initialGyroSensitivity = context.Config.Active?.GyroSensitivity ?? 0.5f;
-        _initialInvertGyro = context.Config.Active?.InvertGyro ?? false;
+        _initialInvert = Context.Config.Active?.InvertMouse ?? false;
+        _initialGyro = Context.Config.Active?.GyroEnabled ?? false;
+        _initialGyroSensitivity = Context.Config.Active?.GyroSensitivity ?? 0.5f;
+        _initialInvertGyro = Context.Config.Active?.InvertGyro ?? false;
         _initialUiScale = DisplayCVars.UiScale.Value;
         _initialTextScale = DisplayCVars.TextScale.Value;
-        _initialRenderScale = context.Host.RenderScaleMode;
+        _initialRenderScale = Context.Host.RenderScaleMode;
         _initialViewDistance = ReconstructionCVars.ViewDistance.Value;
         _initialShowFps = DisplayCVars.ShowFps.Value;
         _initialSunBrightness = LightingCVars.SunBrightness.Value;
@@ -147,10 +203,22 @@ public sealed class SettingsScreen : ShellScreen
     /// <inheritdoc/>
     protected override UiElement? BuildContent(LayoutContext context)
     {
+        // A rebuild (section change) drops the previous tree, so no drag state survives into it.
+        _touchDragStart = null;
+        _isDragging = false;
+        _pendingTapTarget = null;
+
         // This screen's own theme: the shell's colours, with larger text and rows. The shared theme
         // is never mutated -- the other screens are laid out for its sizes. The frame is already as
         // tall as the 1080 reference allows, so the growth is in width, row height and text.
         UiTheme theme = LargeTheme(Context.Theme);
+
+        Section section = _section;
+        if (section == Section.SaveGame && !(Context.InGame && Context.Host.MissionSaves is not null))
+        {
+            section = Section.List;
+            _section = Section.List;
+        }
 
         var root = new Canvas();
 
@@ -163,18 +231,30 @@ public sealed class SettingsScreen : ShellScreen
         };
         root.Add(logo, new Anchor(UiVec2.Zero, new UiVec2(1f, 0.20f), Thickness.Zero));
 
-        // 2. Central Green Tactical Frame ("Configuration")
-        var frame = new IgiTacticalFrame(theme, "Configuration")
+        // 2. Central frame. Opaque dark (alpha 255), one blue hairline: the frame's own background
+        // used to be translucent (alpha 240), letting the level show through the panel.
+        string title = section switch
+        {
+            Section.SaveGame => "Configuration - Save game",
+            Section.Graphics => "Configuration - Graphics",
+            Section.GraphicsQuality => "Configuration - Graphics quality",
+            Section.Controls => "Configuration - Controls",
+            Section.Crosshair => "Configuration - Crosshair",
+            Section.Display => "Configuration - Display & readability",
+            _ => "Configuration",
+        };
+        var frame = new IgiTacticalFrame(theme, title)
         {
             Width = 1280f,
             Height = 880f,
             Margin = new Thickness(0f, 15f, 0f, 0f),
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center,
+            BackgroundColor = Bgra32.FromRgb(8, 16, 30),
         };
 
-        // The options scroll: there are more of them than the frame holds, so the list lives in
-        // a ScrollView and the OK/Cancel bar stays fixed at the bottom of the frame.
+        // The options scroll: a section can hold more rows than the frame shows, so the list lives
+        // in a ScrollView and the button bar stays fixed at the bottom of the frame.
         _scroll = new ScrollView(theme)
         {
             Width = 1190f,
@@ -184,218 +264,207 @@ public sealed class SettingsScreen : ShellScreen
             ScrollbarHitWidth = 56f,
         };
 
-        var configStack = new StackPanel
+        var stack = new StackPanel
         {
             Orientation = Orientation.Vertical,
-            Spacing = 18f,
+            Spacing = 12f,
             Width = 1150f,
         };
-        _scroll.SetContent(configStack);
+        _scroll.SetContent(stack);
 
-        // ── Save game (in-mission only) ─────────────────────────────────
-        // The running mission's own saves, offered here instead of a screen of their own: the pause
-        // menu is where the player already is, and a save is an action, not a setting -- tapping a
-        // slot writes it at once, and Cancel below never undoes it, so no save state joins the
-        // _initial* snapshots or the Cancel restore block. Gated on Context.InGame (set by
-        // Shell.OpenPauseMenu), so settings opened from the main menu show no SAVE GAME section at
-        // all; a title that keeps no saves (MissionSaves null) shows none either, and on hard
-        // difficulty the title offers no slots, so the section says so instead of offering one.
-        // Slot rows come from ITitleSaveGames.Slots (Context.Host.MissionSaves, fed by
-        // GameHost.Startup) and save through MissionSaves.Save(slot): the engine already writes the
-        // save, this screen only triggers it. A row shows its slot's mission time
-        // (TitleSaveSlot.Description); the date a save was written is not on that contract -- the
-        // concrete Igi2MissionSaves.SlotLabel has it, but the Frontend does not reference the Igi2
-        // assembly -- so it is not shown here.
-        // The category is closed, not just opened: a hairline divider (Rule, the same
-        // Theme.Border the GroupHeader rules draw with) sits under the last save row, and
-        // the controls below carry their own CONTROLS header -- the save block used to run
-        // straight into the unheaded controls, which is why it read as the first rows of
-        // the settings instead of a category of its own. Divider and header both sit
-        // inside this gate, so settings opened from the main menu show neither.
-        if (Context.InGame && Context.Host.MissionSaves is { } saves)
+        switch (section)
         {
-            configStack.AddChild(new GroupHeader(theme, "Save game") { Margin = new Thickness(0f, 18f, 0f, 4f) });
-
-            var saveSlotButtons = new List<Button>();
-            var savesLeftLabel = new Label(theme.Body, string.Empty, 20f, theme.TextSecondary);
-            var saveMessageLabel = new Label(theme.Body, string.Empty, 20f, theme.Accent);
-            int confirmedSaveSlot = -1;
-
-            void RefreshSaveSection()
-            {
-                IReadOnlyList<TitleSaveSlot> slots = saves.Slots;
-                for (int i = 0; i < saveSlotButtons.Count && i < slots.Count; i++)
-                {
-                    saveSlotButtons[i].Text = SaveSlotCaption(slots[i]);
-                }
-
-                int left = saves.SavesLeft;
-                savesLeftLabel.Text = left < 0
-                    ? string.Empty
-                    : string.Create(CultureInfo.InvariantCulture, $"Saves left this mission: {left}");
-            }
-
-            foreach (TitleSaveSlot slot in saves.Slots)
-            {
-                int number = slot.Slot;
-                var saveButton = new Button(theme, SaveSlotCaption(slot))
-                {
-                    Width = 1150f,
-                    Height = 68f,
-                };
-                saveButton.Activated += _ =>
-                {
-                    // Overwrite asks twice, the two-tap confirm from MissionSavesScreen.Choose: the
-                    // first tap on a slot that already holds a save only warns, the second writes.
-                    if (saves.SavesLeft == 0)
-                    {
-                        confirmedSaveSlot = -1;
-                        saveMessageLabel.Text = "No saves are left for this mission.";
-                        return;
-                    }
-
-                    TitleSaveSlot current = default;
-                    foreach (TitleSaveSlot held in saves.Slots)
-                    {
-                        if (held.Slot == number)
-                        {
-                            current = held;
-                            break;
-                        }
-                    }
-
-                    if (current.IsUsed && confirmedSaveSlot != number)
-                    {
-                        confirmedSaveSlot = number;
-                        saveMessageLabel.Text = string.Create(
-                            CultureInfo.InvariantCulture,
-                            $"Slot {number + 1} holds a save - mission time {current.Description}. Choose it again to overwrite.");
-                        return;
-                    }
-
-                    confirmedSaveSlot = -1;
-                    saveMessageLabel.Text = saves.Save(number) ? "Saving complete." : "Saving failed.";
-                    RefreshSaveSection();
-                };
-                saveSlotButtons.Add(saveButton);
-                configStack.AddChild(saveButton);
-            }
-
-            configStack.AddChild(savesLeftLabel);
-            configStack.AddChild(saveMessageLabel);
-            if (saveSlotButtons.Count == 0)
-            {
-                saveMessageLabel.Text = "This difficulty keeps no saves.";
-            }
-
-            RefreshSaveSection();
-
-            // The category's closing edge: a hairline in the same Theme.Border the GroupHeader
-            // rules draw with, with clear space on both sides, so the save block ends visibly
-            // instead of running straight into the controls below.
-            configStack.AddChild(new Rule
-            {
-                Orientation = Orientation.Horizontal,
-                Length = 1150f,
-                Color = theme.Border,
-                Margin = new Thickness(0f, 12f, 0f, 12f),
-            });
-
-            // The next category's own header: the controls below were unheaded, so the save
-            // rows read as the first rows of one long list. Headed like Graphics and Graphics
-            // quality below, the save block now sits between two headers -- its own SAVE GAME
-            // above and CONTROLS below -- which is what makes it a category of its own.
-            configStack.AddChild(new GroupHeader(theme, "Controls") { Margin = new Thickness(0f, 18f, 0f, 4f) });
+            case Section.List:
+                BuildSectionList(stack, theme);
+                break;
+            case Section.SaveGame:
+                BuildSaveGameSection(stack, theme);
+                break;
+            case Section.Graphics:
+                BuildGraphicsSection(stack, theme);
+                break;
+            case Section.GraphicsQuality:
+                BuildGraphicsQualitySection(stack, theme);
+                break;
+            case Section.Controls:
+                BuildControlsSection(stack, theme);
+                break;
+            case Section.Crosshair:
+                BuildCrosshairSection(stack, theme);
+                break;
+            case Section.Display:
+                BuildDisplaySection(stack, theme);
+                break;
         }
 
-        // ── Option 1: On-Screen Touch Controls Customizer ─────────────────
-        var customizeRow = new FlexPanel
-        {
-            Orientation = Orientation.Horizontal,
-            Gap = 16f,
-            Width = 1150f,
-        };
+        frame.AddChild(_scroll);
+        frame.AddChild(BuildButtonBar(theme, section != Section.List));
+        root.Add(frame, new Anchor(UiVec2.Zero, UiVec2.One, Thickness.Zero));
 
-        var customizeBtn = new Button(theme, "CUSTOMIZE ON-SCREEN CONTROLS")
+        // 3. BACK, top-left of the screen, on every view: the visible back control. It is Cancel —
+        // it restores the entry-time snapshots and closes — exactly like the Cancel button and the
+        // Android Back key. It sits outside the frame, clear of the centred logo and the frame edge.
+        var backBtn = new Button(theme, "BACK")
         {
             Accent = ButtonAccent.Ghost,
-            Width = 1150f,
-            Height = 80f,
-            TextSize = 36f,
+            Width = 220f,
+            Height = RowHeightUnits,
+            TextSize = SectionRowTextSize,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            VerticalAlignment = VerticalAlignment.Top,
         };
-        customizeBtn.Activated += _ => Context.Host.CustomizeTouchControls();
-        customizeRow.Add(customizeBtn);
-        configStack.AddChild(customizeRow);
+        backBtn.Activated += _ =>
+        {
+            RestoreSnapshots();
+            CloseConfig();
+        };
+        root.Add(backBtn, new Anchor(UiVec2.Zero, UiVec2.Zero, new Thickness(32f, 32f, 0f, 0f)));
 
-        // ── Option 2: Controls Alpha Slider (20% to 100%) ─────────────────
-        int initialPct = (int)Math.Round(Context.Host.TouchOpacity * 100f);
-        var alphaSlider = new Slider(theme, "Controls Alpha", 20f, 100f, initialPct, 5f)
-        {
-            Width = 1150f,
-            Height = 68f,
-        };
-        alphaSlider.ValueChanged += value =>
-        {
-            float norm = Math.Clamp(value / 100f, 0.20f, 1.0f);
-            Context.Host.TouchOpacity = norm;
-        };
-        configStack.AddChild(alphaSlider);
+        return root;
+    }
 
-        // ── Option 3: Touch Sensitivity Slider (20% to 300%) ──────────────
-        int initialSensPct = (int)Math.Round(Context.Host.TouchSensitivity * 100f);
-        var sensSlider = new Slider(theme, "Touch Sensitivity", 20f, 300f, initialSensPct, 5f)
+    /// <summary>The section list: one 48 dp row per section, with the save/cancel rule stated on screen.</summary>
+    private void BuildSectionList(StackPanel stack, UiTheme theme)
+    {
+        var intro = new Label(
+            theme.Body,
+            "Choose a section. Changes apply as you make them: OK saves them, Back or Cancel discards every change made since Configuration was opened.",
+            20f,
+            theme.TextSecondary)
         {
-            Width = 1150f,
-            Height = 68f,
+            Width = RowWidthUnits,
+            Wrap = true,
+            Margin = new Thickness(0f, 18f, 0f, 6f),
         };
-        sensSlider.ValueChanged += value =>
-        {
-            float norm = Math.Clamp(value / 100f, 0.20f, 3.0f);
-            Context.Host.TouchSensitivity = norm;
-        };
-        configStack.AddChild(sensSlider);
+        stack.AddChild(intro);
 
-        // ── Option 4: UI Size Slider (80% to 200%) ─────────────────────────
-        // Backed by r_ui_scale, so the size survives a relaunch; the host hands the value to the
-        // layout as its user scale, which is what makes the whole shell -- this screen included --
-        // draw larger. The old version wrote a static nothing ever saved.
-        int initialUiPct = (int)Math.Round(DisplayCVars.UiScale.Value * 100f);
-        var uiSizeSlider = new Slider(theme, "UI Size", 80f, 200f, initialUiPct, 5f)
+        if (Context.InGame && Context.Host.MissionSaves is not null)
         {
-            Width = 1150f,
-            Height = 68f,
-        };
-        uiSizeSlider.ValueChanged += value =>
-        {
-            DisplayCVars.UiScale.Value = Math.Clamp(value / 100f, 0.8f, 2.0f);
-        };
-        configStack.AddChild(uiSizeSlider);
+            AddSectionRow(stack, theme, "Save game", Section.SaveGame);
+        }
 
-        // ── Option 4: Text Size Slider (80% to 150%) ───────────────────────
-        // Backed by r_text_scale, so it survives a relaunch too; the row widgets multiply the size
-        // they resolve by it as they draw, so it takes effect live. It used to write a static no
-        // text drawing ever read, so the slider did nothing at all.
-        int initialTextPct = (int)Math.Round(DisplayCVars.TextScale.Value * 100f);
-        var textSizeSlider = new Slider(theme, "Text Size", 80f, 150f, initialTextPct, 5f)
-        {
-            Width = 1150f,
-            Height = 68f,
-        };
-        textSizeSlider.ValueChanged += value =>
-        {
-            DisplayCVars.TextScale.Value = Math.Clamp(value / 100f, 0.8f, 1.5f);
-        };
-        configStack.AddChild(textSizeSlider);
+        AddSectionRow(stack, theme, "Graphics", Section.Graphics);
+        AddSectionRow(stack, theme, "Graphics quality", Section.GraphicsQuality);
+        AddSectionRow(stack, theme, "Controls", Section.Controls);
+        AddSectionRow(stack, theme, "Crosshair", Section.Crosshair);
+        AddSectionRow(stack, theme, "Display & readability", Section.Display);
+    }
 
-        // ── Graphics ───────────────────────────────────────────────────────
-        // One category for every graphics option that actually changes the picture on
-        // the Android path (first-run preset Vanilla: the original's forward path
-        // straight to the back buffer, no offscreen scene, no Resolve pass). Rows
-        // that only run on the deferred/HDR path are deliberately not here — see the
-        // PR body for the list and why.
-        configStack.AddChild(new GroupHeader(theme, "Graphics") { Margin = new Thickness(0f, 18f, 0f, 4f) });
+    /// <summary>One section row: its name, with a chevron that says it opens a sub-screen.</summary>
+    private void AddSectionRow(StackPanel stack, UiTheme theme, string title, Section section)
+    {
+        var row = new Button(theme, title + " >")
+        {
+            Width = RowWidthUnits,
+            Height = RowHeightUnits,
+            TextSize = SectionRowTextSize,
+        };
+        row.Activated += _ => GoToSection(section);
+        stack.AddChild(row);
+    }
 
-        // ── Option 5: Max Frame Rate (FPS Cap) ───────────────────────────
+    /// <summary>Save game: the running mission's own saves, as a sub-screen of their own.</summary>
+    /// <remarks>
+    /// A save is an action, not a setting — tapping a slot writes it at once, and Cancel never
+    /// undoes it, so no save state joins the _initial* snapshots or the Cancel restore block. On
+    /// hard difficulty the title offers no slots, so the section says so instead of offering one.
+    /// Slot rows come from ITitleSaveGames.Slots (Context.Host.MissionSaves, fed by GameHost.Startup)
+    /// and save through MissionSaves.Save(slot): the engine already writes the save, this screen only
+    /// triggers it. A row shows its slot's mission time (TitleSaveSlot.Description); the date a save
+    /// was written is not on that contract — the concrete Igi2MissionSaves.SlotLabel has it, but the
+    /// Frontend does not reference the Igi2 assembly — so it is not shown here.
+    /// </remarks>
+    private void BuildSaveGameSection(StackPanel stack, UiTheme theme)
+    {
+        if (Context.Host.MissionSaves is not { } saves)
+        {
+            return;
+        }
+
+        var saveSlotButtons = new List<Button>();
+        var savesLeftLabel = new Label(theme.Body, string.Empty, 20f, theme.TextSecondary);
+        var saveMessageLabel = new Label(theme.Body, string.Empty, 20f, theme.Accent);
+        int confirmedSaveSlot = -1;
+
+        void RefreshSaveSection()
+        {
+            IReadOnlyList<TitleSaveSlot> slots = saves.Slots;
+            for (int i = 0; i < saveSlotButtons.Count && i < slots.Count; i++)
+            {
+                saveSlotButtons[i].Text = SaveSlotCaption(slots[i]);
+            }
+
+            int left = saves.SavesLeft;
+            savesLeftLabel.Text = left < 0
+                ? string.Empty
+                : string.Create(CultureInfo.InvariantCulture, $"Saves left this mission: {left}");
+        }
+
+        foreach (TitleSaveSlot slot in saves.Slots)
+        {
+            int number = slot.Slot;
+            var saveButton = new Button(theme, SaveSlotCaption(slot))
+            {
+                Width = RowWidthUnits,
+                Height = RowHeightUnits,
+            };
+            saveButton.Activated += _ =>
+            {
+                // Overwrite asks twice, the two-tap confirm from MissionSavesScreen.Choose: the
+                // first tap on a slot that already holds a save only warns, the second writes.
+                if (saves.SavesLeft == 0)
+                {
+                    confirmedSaveSlot = -1;
+                    saveMessageLabel.Text = "No saves are left for this mission.";
+                    return;
+                }
+
+                TitleSaveSlot current = default;
+                foreach (TitleSaveSlot held in saves.Slots)
+                {
+                    if (held.Slot == number)
+                    {
+                        current = held;
+                        break;
+                    }
+                }
+
+                if (current.IsUsed && confirmedSaveSlot != number)
+                {
+                    confirmedSaveSlot = number;
+                    saveMessageLabel.Text = string.Create(
+                        CultureInfo.InvariantCulture,
+                        $"Slot {number + 1} holds a save - mission time {current.Description}. Choose it again to overwrite.");
+                    return;
+                }
+
+                confirmedSaveSlot = -1;
+                saveMessageLabel.Text = saves.Save(number) ? "Saving complete." : "Saving failed.";
+                RefreshSaveSection();
+            };
+            saveSlotButtons.Add(saveButton);
+            stack.AddChild(saveButton);
+        }
+
+        stack.AddChild(savesLeftLabel);
+        stack.AddChild(saveMessageLabel);
+        if (saveSlotButtons.Count == 0)
+        {
+            saveMessageLabel.Text = "This difficulty keeps no saves.";
+        }
+
+        RefreshSaveSection();
+    }
+
+    /// <summary>
+    /// Graphics: every graphics option that actually changes the picture on the Android path
+    /// (first-run preset Vanilla: the original's forward path straight to the back buffer, no
+    /// offscreen scene, no Resolve pass). Rows that only run on the deferred/HDR path are
+    /// deliberately not here.
+    /// </summary>
+    private void BuildGraphicsSection(StackPanel stack, UiTheme theme)
+    {
+        // ── Max Frame Rate (FPS Cap) ─────────────────────────────────────
         // The default is uncapped (0): the CVar's own default and the first-run value, and the loop
         // holds a picked cap strictly (see BeginFramePass). A value the cycler does not offer shows
         // the nearest offered cap rather than claiming Uncapped; the stored value itself is left alone
@@ -418,8 +487,8 @@ public sealed class SettingsScreen : ShellScreen
 
         var fpsCycler = new OptionCycler(theme, "Max Frame Rate", FpsCapLabels, selectedFpsIndex)
         {
-            Width = 1150f,
-            Height = 68f,
+            Width = RowWidthUnits,
+            Height = RowHeightUnits,
             ContentWidth = 320f,
         };
         fpsCycler.SelectionChanged += index =>
@@ -427,23 +496,23 @@ public sealed class SettingsScreen : ShellScreen
             int cap = FpsCapValues[index];
             ReconstructionCVars.FrameLimit.Value = cap;
         };
-        configStack.AddChild(fpsCycler);
+        stack.AddChild(fpsCycler);
 
-        // ── Option 6: Render Resolution Quality (720p / 900p / Native) ───
+        // ── Render Resolution Quality ──────────────────────────────────────
         int currentRes = Context.Host.RenderScaleMode;
         var resCycler = new OptionCycler(theme, "Resolution Quality", RenderScaleLabels, Math.Clamp(currentRes, 0, 3))
         {
-            Width = 1150f,
-            Height = 68f,
+            Width = RowWidthUnits,
+            Height = RowHeightUnits,
             ContentWidth = 320f,
         };
         resCycler.SelectionChanged += index =>
         {
             Context.Host.RenderScaleMode = index;
         };
-        configStack.AddChild(resCycler);
+        stack.AddChild(resCycler);
 
-        // ── View Distance: how far the world draws ──────────────────────────────
+        // ── View Distance: how far the world draws ────────────────────────
         // Shortens the far plane: Far is the original's 100 km, 50% is 50 km, Medium 10 km, Near 2.5 km. The
         // original's own fog hides everything past about two and a half kilometres anyway, so Near
         // loses almost nothing visible and skips drawing what the fog would have hidden. The sky dome
@@ -461,8 +530,8 @@ public sealed class SettingsScreen : ShellScreen
 
         var viewDistanceCycler = new OptionCycler(theme, "View Distance", ViewDistanceLabels, selectedViewDistanceIndex)
         {
-            Width = 1150f,
-            Height = 68f,
+            Width = RowWidthUnits,
+            Height = RowHeightUnits,
             ContentWidth = 320f,
             Tooltip = "How far the world draws. Near (2.5 km) skips what the original's fog hides anyway; 50% is 50 km; Far is the original's 100 km.",
         };
@@ -470,9 +539,9 @@ public sealed class SettingsScreen : ShellScreen
         {
             ReconstructionCVars.ViewDistance.Value = ViewDistanceValues[index];
         };
-        configStack.AddChild(viewDistanceCycler);
+        stack.AddChild(viewDistanceCycler);
 
-        // ── Sun: how bright the level sun reads ─────────────────────────────
+        // ── Sun: how bright the level sun reads ───────────────────────────
         // Scales the authored sun that lights the models and the world's bakes.
         // Above 100% dark areas read brighter; 100% is the level as authored.
         // (Display gamma only runs in the Resolve pass, which the vanilla path
@@ -480,14 +549,14 @@ public sealed class SettingsScreen : ShellScreen
         float initialSun = LightingCVars.SunBrightness.Value;
         var sunSlider = new Slider(theme, "Sun", 50f, 300f, (int)Math.Round(initialSun * 100f), 5f)
         {
-            Width = 1150f,
-            Height = 68f,
+            Width = RowWidthUnits,
+            Height = RowHeightUnits,
         };
         sunSlider.ValueChanged += value =>
         {
             LightingCVars.SunBrightness.Value = Math.Clamp(value / 100f, 0.5f, 3f);
         };
-        configStack.AddChild(sunSlider);
+        stack.AddChild(sunSlider);
 
         // ── Smooth Motion: draw at the display's rate, not the original's 30 Hz ──
         // Interpolates between the original's fixed 30 ticks a second. Off restores
@@ -495,37 +564,39 @@ public sealed class SettingsScreen : ShellScreen
         bool smoothState = FrameCVars.SmoothPresentation.Value;
         var smoothToggle = new Toggle(theme, "Smooth Motion", smoothState)
         {
-            Width = 1150f,
-            Height = 68f,
+            Width = RowWidthUnits,
+            Height = RowHeightUnits,
             Tooltip = "Draw the world at your display's rate instead of the original's fixed 30 steps a second. Off restores the original cadence.",
         };
         smoothToggle.ValueChanged += val =>
         {
             FrameCVars.SmoothPresentation.Value = val;
         };
-        configStack.AddChild(smoothToggle);
+        stack.AddChild(smoothToggle);
 
-        // ── Show FPS Counter Overlay (moved up from the end of the list) ───────
+        // ── Show FPS Counter Overlay ───────────────────────────────────────
         bool showFpsState = DisplayCVars.ShowFps.Value;
         var fpsToggle = new Toggle(theme, "Show FPS Counter", showFpsState)
         {
-            Width = 1150f,
-            Height = 68f,
+            Width = RowWidthUnits,
+            Height = RowHeightUnits,
         };
         fpsToggle.ValueChanged += val =>
         {
             DisplayCVars.ShowFps.Value = val;
         };
-        configStack.AddChild(fpsToggle);
+        stack.AddChild(fpsToggle);
+    }
 
-        // ── Graphics quality ───────────────────────────────────────────────
-        // Texture sharpness is the knob for Ray's "snow looks too smooth": vanilla
-        // pins anisotropy to 1 (off), and without it the ground smears towards the
-        // horizon. The rest are the combat/weather picture knobs that are live on
-        // this path. The texture rows apply at once now -- changing one re-resolves the
-        // samplers of textures already loaded -- instead of waiting for the next level.
-        configStack.AddChild(new GroupHeader(theme, "Graphics quality") { Margin = new Thickness(0f, 18f, 0f, 4f) });
-
+    /// <summary>
+    /// Graphics quality: texture sharpness is the knob for "snow looks too smooth" — vanilla pins
+    /// anisotropy to 1 (off), and without it the ground smears towards the horizon. The rest are the
+    /// combat/weather picture knobs that are live on this path. The texture rows apply at once now —
+    /// changing one re-resolves the samplers of textures already loaded — instead of waiting for the
+    /// next level.
+    /// </summary>
+    private void BuildGraphicsQualitySection(StackPanel stack, UiTheme theme)
+    {
         // ── Texture Sharpness: anisotropic filtering (Off / 4x / 8x / 16x) ─────
         int currentAnisotropy = MaterialCVars.Anisotropy.Value;
         int selectedAnisotropyIndex = Array.IndexOf(AnisotropyValues, currentAnisotropy);
@@ -536,8 +607,8 @@ public sealed class SettingsScreen : ShellScreen
 
         var anisotropyCycler = new OptionCycler(theme, "Texture Sharpness", AnisotropyLabels, selectedAnisotropyIndex)
         {
-            Width = 1150f,
-            Height = 68f,
+            Width = RowWidthUnits,
+            Height = RowHeightUnits,
             ContentWidth = 320f,
             Tooltip = "How sharp the ground stays into the distance. Off is the original's look; higher keeps snow and terrain crisp towards the horizon. Applies immediately.",
         };
@@ -545,21 +616,21 @@ public sealed class SettingsScreen : ShellScreen
         {
             MaterialCVars.Anisotropy.Value = AnisotropyValues[index];
         };
-        configStack.AddChild(anisotropyCycler);
+        stack.AddChild(anisotropyCycler);
 
         // ── Blend Mip Levels: linear mip blending instead of the original's nearest ──
         bool mipBlendState = !MaterialCVars.PointMips.Value;
         var mipBlendToggle = new Toggle(theme, "Blend Mip Levels", mipBlendState)
         {
-            Width = 1150f,
-            Height = 68f,
+            Width = RowWidthUnits,
+            Height = RowHeightUnits,
             Tooltip = "Blend between mip levels instead of taking the nearest one, as the original does. Off is the original's slightly crisper, slightly shimmering look. Applies immediately.",
         };
         mipBlendToggle.ValueChanged += val =>
         {
             MaterialCVars.PointMips.Value = !val;
         };
-        configStack.AddChild(mipBlendToggle);
+        stack.AddChild(mipBlendToggle);
 
         // ── Texture Quality: how sharp textures stay at a distance ───────────
         // A bias on the mip selection, on top of what the render scale asks for: High samples one
@@ -568,8 +639,8 @@ public sealed class SettingsScreen : ShellScreen
         int currentTextureQuality = Math.Clamp(MaterialCVars.TextureQuality.Value, 0, 2);
         var textureQualityCycler = new OptionCycler(theme, "Texture Quality", TextureQualityLabels, currentTextureQuality)
         {
-            Width = 1150f,
-            Height = 68f,
+            Width = RowWidthUnits,
+            Height = RowHeightUnits,
             ContentWidth = 320f,
             Tooltip = "How sharp textures stay at a distance. High samples the sharper mip levels; Low softens them. Applies immediately, on Vulkan.",
         };
@@ -577,23 +648,23 @@ public sealed class SettingsScreen : ShellScreen
         {
             MaterialCVars.TextureQuality.Value = index;
         };
-        configStack.AddChild(textureQualityCycler);
+        stack.AddChild(textureQualityCycler);
 
         // ── Muzzle Flash: how bright the flame at the barrel is ───────────────
         float initialMuzzleFlash = CombatEffectCVars.MuzzleFlash.Value;
         var muzzleSlider = new Slider(theme, "Muzzle Flash", 0f, 100f, (int)Math.Round(initialMuzzleFlash * 100f), 5f)
         {
-            Width = 1150f,
-            Height = 68f,
+            Width = RowWidthUnits,
+            Height = RowHeightUnits,
             Tooltip = "How bright the flame at the barrel is. 100% is the original's; 0 removes it.",
         };
         muzzleSlider.ValueChanged += value =>
         {
             CombatEffectCVars.MuzzleFlash.Value = Math.Clamp(value / 100f, 0f, 1f);
         };
-        configStack.AddChild(muzzleSlider);
+        stack.AddChild(muzzleSlider);
 
-        // Impact Effects and Impact Particles are deliberately NOT here any more: both are I.G.I. 1
+        // Impact Effects and Impact Particles are deliberately NOT here: both are I.G.I. 1
         // systems with no I.G.I. 2 input. The retail impacts view is only registered by the I.G.I. 1
         // presenter, so the toggle gated a null draw; the particle bursts only ever came from the
         // I.G.I. 1 rig's ballistics, which never fires on this title, and no I.G.I. 2 code calls the
@@ -604,77 +675,82 @@ public sealed class SettingsScreen : ShellScreen
         bool weatherState = WeatherCVars.WeatherEnabled.Value;
         var weatherToggle = new Toggle(theme, "Weather", weatherState)
         {
-            Width = 1150f,
-            Height = 68f,
+            Width = RowWidthUnits,
+            Height = RowHeightUnits,
             Tooltip = "Draw the rain or snow the level authors gave each mission.",
         };
         weatherToggle.ValueChanged += val =>
         {
             WeatherCVars.WeatherEnabled.Value = val;
         };
-        configStack.AddChild(weatherToggle);
+        stack.AddChild(weatherToggle);
 
         // ── Storm Effects: the remastered particle storm instead of the original's rain band ──
         bool stormState = WeatherCVars.Storm.Value;
         var stormToggle = new Toggle(theme, "Storm Effects", stormState)
         {
-            Width = 1150f,
-            Height = 68f,
+            Width = RowWidthUnits,
+            Height = RowHeightUnits,
             Tooltip = "Wind-blown storm rain with splashes and lightning, instead of the original's fixed rain band. Only where a level rains.",
         };
         stormToggle.ValueChanged += val =>
         {
             WeatherCVars.Storm.Value = val;
         };
-        configStack.AddChild(stormToggle);
+        stack.AddChild(stormToggle);
+    }
 
-        // ── Crosshair: size, colour and outline ────────────────────────────
-        // The sight is a hairline at 1px on a dense display; these make it readable.
-        // They apply to whichever sight is drawn: the original's lines and the
-        // remastered cross alike.
-        float initialCrosshair = HudCVars.CrosshairScale.Value;
-        var crosshairSlider = new Slider(theme, "Crosshair size", 50f, 300f, (int)Math.Round(initialCrosshair * 100f), 5f)
+    /// <summary>
+    /// Controls: the touch customizer, controls alpha/sensitivity, invert look, and the gyroscope
+    /// rows — which used to sit under "Graphics quality" with no header of their own.
+    /// </summary>
+    private void BuildControlsSection(StackPanel stack, UiTheme theme)
+    {
+        // ── On-Screen Touch Controls Customizer ───────────────────────────
+        var customizeBtn = new Button(theme, "CUSTOMIZE ON-SCREEN CONTROLS")
         {
-            Width = 1150f,
-            Height = 68f,
+            Accent = ButtonAccent.Ghost,
+            Width = RowWidthUnits,
+            Height = RowHeightUnits,
+            TextSize = 36f,
         };
-        crosshairSlider.ValueChanged += value =>
-        {
-            HudCVars.CrosshairScale.Value = Math.Clamp(value / 100f, 0.5f, 3f);
-        };
-        configStack.AddChild(crosshairSlider);
+        customizeBtn.Activated += _ => Context.Host.CustomizeTouchControls();
+        stack.AddChild(customizeBtn);
 
-        var crosshairColourBtn = new Button(theme, "Crosshair colour: " + CrosshairPalette.Names[HudCVars.CrosshairColor.Value])
+        // ── Controls Alpha Slider (20% to 100%) ───────────────────────────
+        int initialPct = (int)Math.Round(Context.Host.TouchOpacity * 100f);
+        var alphaSlider = new Slider(theme, "Controls Alpha", 20f, 100f, initialPct, 5f)
         {
-            Width = 1150f,
-            Height = 68f,
+            Width = RowWidthUnits,
+            Height = RowHeightUnits,
         };
-        crosshairColourBtn.Activated += _ =>
+        alphaSlider.ValueChanged += value =>
         {
-            int next = (HudCVars.CrosshairColor.Value + 1) % CrosshairPalette.Names.Length;
-            HudCVars.CrosshairColor.Value = next;
-            crosshairColourBtn.Text = "Crosshair colour: " + CrosshairPalette.Names[next];
+            float norm = Math.Clamp(value / 100f, 0.20f, 1.0f);
+            Context.Host.TouchOpacity = norm;
         };
-        configStack.AddChild(crosshairColourBtn);
+        stack.AddChild(alphaSlider);
 
-        bool crosshairOutlineState = HudCVars.CrosshairOutline.Value;
-        var crosshairOutlineToggle = new Toggle(theme, "Crosshair outline", crosshairOutlineState)
+        // ── Touch Sensitivity Slider (20% to 300%) ────────────────────────
+        int initialSensPct = (int)Math.Round(Context.Host.TouchSensitivity * 100f);
+        var sensSlider = new Slider(theme, "Touch Sensitivity", 20f, 300f, initialSensPct, 5f)
         {
-            Width = 1150f,
-            Height = 68f,
+            Width = RowWidthUnits,
+            Height = RowHeightUnits,
         };
-        crosshairOutlineToggle.ValueChanged += val =>
+        sensSlider.ValueChanged += value =>
         {
-            HudCVars.CrosshairOutline.Value = val;
+            float norm = Math.Clamp(value / 100f, 0.20f, 3.0f);
+            Context.Host.TouchSensitivity = norm;
         };
-        configStack.AddChild(crosshairOutlineToggle);
+        stack.AddChild(sensSlider);
 
-        // ── Option 7: Invert Mouse / Look Pitch ───────────────────────────
+        // ── Invert Mouse / Look Pitch ──────────────────────────────────────
         bool invertState = Context.Config.Active?.InvertMouse ?? false;
         var invertToggle = new Toggle(theme, "Invert Look / Mouse", invertState)
         {
-            Width = 1150f,
-            Height = 68f,
+            Width = RowWidthUnits,
+            Height = RowHeightUnits,
         };
         invertToggle.ValueChanged += val =>
         {
@@ -683,16 +759,14 @@ public sealed class SettingsScreen : ShellScreen
                 profile.InvertMouse = val;
             }
         };
-        configStack.AddChild(invertToggle);
+        stack.AddChild(invertToggle);
 
-        // ── Gyroscope aim (Android only; tilt the phone to aim) ─────────────
-        // This is the live Configuration screen. (An earlier version put this toggle
-        // in ControlsSettingsTab, which nothing ever shows, so it never appeared.)
+        // ── Gyroscope aim (Android only; tilt the phone to aim) ───────────
         bool gyroState = Context.Config.Active?.GyroEnabled ?? false;
         var gyroToggle = new Toggle(theme, "Gyroscope aim", gyroState)
         {
-            Width = 1150f,
-            Height = 68f,
+            Width = RowWidthUnits,
+            Height = RowHeightUnits,
             Tooltip = "Tilt the phone to aim. Only on Android, and only while playing.",
         };
         gyroToggle.ValueChanged += val =>
@@ -702,14 +776,14 @@ public sealed class SettingsScreen : ShellScreen
                 profile.GyroEnabled = val;
             }
         };
-        configStack.AddChild(gyroToggle);
+        stack.AddChild(gyroToggle);
 
-        // ── Gyroscope sensitivity ────────────────────────────────────────────
+        // ── Gyroscope sensitivity ──────────────────────────────────────────
         float gyroSensState = Context.Config.Active?.GyroSensitivity ?? 0.5f;
         var gyroSensSlider = new Slider(theme, "Gyroscope sensitivity", 0f, 1f, gyroSensState, 0.05f)
         {
-            Width = 1150f,
-            Height = 68f,
+            Width = RowWidthUnits,
+            Height = RowHeightUnits,
             Format = v => string.Create(
                 CultureInfo.InvariantCulture,
                 $"{MouseLookSettings.FromSensitivity(v, invertPitch: false).TurnDistanceCentimetres():0} cm/360°"),
@@ -722,14 +796,14 @@ public sealed class SettingsScreen : ShellScreen
                 profile.GyroSensitivity = value;
             }
         };
-        configStack.AddChild(gyroSensSlider);
+        stack.AddChild(gyroSensSlider);
 
         // ── Invert gyroscope ───────────────────────────────────────────────
         bool invertGyroState = Context.Config.Active?.InvertGyro ?? false;
         var invertGyroToggle = new Toggle(theme, "Invert gyroscope", invertGyroState)
         {
-            Width = 1150f,
-            Height = 68f,
+            Width = RowWidthUnits,
+            Height = RowHeightUnits,
             Tooltip = "Tilt the phone and the view turns the opposite way, left/right and forward/back.",
         };
         invertGyroToggle.ValueChanged += val =>
@@ -739,86 +813,235 @@ public sealed class SettingsScreen : ShellScreen
                 profile.InvertGyro = val;
             }
         };
-        configStack.AddChild(invertGyroToggle);
+        stack.AddChild(invertGyroToggle);
+    }
 
+    /// <summary>
+    /// Crosshair: size, colour and outline. The sight is a hairline at 1px on a dense display;
+    /// these make it readable. They apply to whichever sight is drawn: the original's lines and
+    /// the remastered cross alike.
+    /// </summary>
+    private void BuildCrosshairSection(StackPanel stack, UiTheme theme)
+    {
+        float initialCrosshair = HudCVars.CrosshairScale.Value;
+        var crosshairSlider = new Slider(theme, "Crosshair size", 50f, 300f, (int)Math.Round(initialCrosshair * 100f), 5f)
+        {
+            Width = RowWidthUnits,
+            Height = RowHeightUnits,
+        };
+        crosshairSlider.ValueChanged += value =>
+        {
+            HudCVars.CrosshairScale.Value = Math.Clamp(value / 100f, 0.5f, 3f);
+        };
+        stack.AddChild(crosshairSlider);
 
-        frame.AddChild(_scroll);
+        var crosshairColourBtn = new Button(theme, "Crosshair colour: " + CrosshairPalette.Names[HudCVars.CrosshairColor.Value])
+        {
+            Width = RowWidthUnits,
+            Height = RowHeightUnits,
+        };
+        crosshairColourBtn.Activated += _ =>
+        {
+            int next = (HudCVars.CrosshairColor.Value + 1) % CrosshairPalette.Names.Length;
+            HudCVars.CrosshairColor.Value = next;
+            crosshairColourBtn.Text = "Crosshair colour: " + CrosshairPalette.Names[next];
+        };
+        stack.AddChild(crosshairColourBtn);
 
-        // ── Bottom Buttons: OK & Cancel ──────────────────────────────────
+        bool crosshairOutlineState = HudCVars.CrosshairOutline.Value;
+        var crosshairOutlineToggle = new Toggle(theme, "Crosshair outline", crosshairOutlineState)
+        {
+            Width = RowWidthUnits,
+            Height = RowHeightUnits,
+        };
+        crosshairOutlineToggle.ValueChanged += val =>
+        {
+            HudCVars.CrosshairOutline.Value = val;
+        };
+        stack.AddChild(crosshairOutlineToggle);
+    }
+
+    /// <summary>
+    /// Display &amp; readability: UI Size and Text Size, as a section of their own instead of buried
+    /// mid-list — they are the escape hatch for the small-text problem, so they get a caption that
+    /// says what they scale.
+    /// </summary>
+    private void BuildDisplaySection(StackPanel stack, UiTheme theme)
+    {
+        var caption = new Label(
+            theme.Body,
+            "UI Size scales every shell screen, this one included. Text Size scales the text on the rows. Both apply at once and survive a relaunch.",
+            20f,
+            theme.TextSecondary)
+        {
+            Width = RowWidthUnits,
+            Wrap = true,
+            Margin = new Thickness(0f, 18f, 0f, 6f),
+        };
+        stack.AddChild(caption);
+
+        // ── UI Size Slider (80% to 200%) ───────────────────────────────────
+        // Backed by r_ui_scale, so the size survives a relaunch; the host hands the value to the
+        // layout as its user scale, which is what makes the whole shell -- this screen included --
+        // draw larger. The old version wrote a static nothing ever saved.
+        int initialUiPct = (int)Math.Round(DisplayCVars.UiScale.Value * 100f);
+        var uiSizeSlider = new Slider(theme, "UI Size", 80f, 200f, initialUiPct, 5f)
+        {
+            Width = RowWidthUnits,
+            Height = RowHeightUnits,
+        };
+        uiSizeSlider.ValueChanged += value =>
+        {
+            DisplayCVars.UiScale.Value = Math.Clamp(value / 100f, 0.8f, 2.0f);
+        };
+        stack.AddChild(uiSizeSlider);
+
+        // ── Text Size Slider (80% to 150%) ─────────────────────────────────
+        // Backed by r_text_scale, so it survives a relaunch too; the row widgets multiply the size
+        // they resolve by it as they draw, so it takes effect live. It used to write a static no
+        // text drawing ever read, so the slider did nothing at all.
+        int initialTextPct = (int)Math.Round(DisplayCVars.TextScale.Value * 100f);
+        var textSizeSlider = new Slider(theme, "Text Size", 80f, 150f, initialTextPct, 5f)
+        {
+            Width = RowWidthUnits,
+            Height = RowHeightUnits,
+        };
+        textSizeSlider.ValueChanged += value =>
+        {
+            DisplayCVars.TextScale.Value = Math.Clamp(value / 100f, 0.8f, 1.5f);
+        };
+        stack.AddChild(textSizeSlider);
+    }
+
+    /// <summary>
+    /// The bottom bar: OK and Cancel at the bottom-right on every view. Sub-screens also get
+    /// SECTIONS at the bottom-left, which returns to the section list without saving or discarding.
+    /// </summary>
+    private FlexPanel BuildButtonBar(UiTheme theme, bool showSections)
+    {
         var btnBar = new FlexPanel
         {
             Orientation = Orientation.Horizontal,
             Gap = 28f,
-            HorizontalAlignment = HorizontalAlignment.Right,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
             VerticalAlignment = VerticalAlignment.Bottom,
-            Margin = new Thickness(0f, 0f, 32f, 16f),
+            Margin = new Thickness(32f, 0f, 32f, 16f),
         };
+
+        if (showSections)
+        {
+            var sectionsBtn = new Button(theme, "SECTIONS")
+            {
+                Accent = ButtonAccent.Ghost,
+                Width = 240f,
+                Height = RowHeightUnits,
+                TextSize = 28f,
+            };
+            sectionsBtn.Activated += _ => GoToList();
+            btnBar.Add(sectionsBtn);
+        }
+
+        // Pushes OK/Cancel to the right edge.
+        btnBar.Add(new Panel(), grow: 1f);
 
         var okBtn = new IgiMenuButton(theme, "OK")
         {
             TextSize = 36f,
-            Height = 72f,
+            Height = RowHeightUnits,
             Width = 220f,
             NormalColor = Bgra32.FromRgb(80, 160, 255),
             HoverColor = Bgra32.FromRgb(228, 238, 252),
         };
         okBtn.Activated += () =>
         {
-            Context.Host.SaveSettings();
-
-            // Profiles carry Invert, Gyro and gyro sensitivity, which settings.cfg never wrote: OK
-            // used to leave them to the save on exit, so they were lost whenever the app was killed
-            // or swiped away after OK instead of quit cleanly.
-            Context.Host.SaveProfiles();
-            CloseConfig();
+            SaveAll();
+            if (_section == Section.List)
+            {
+                CloseConfig();
+            }
+            else
+            {
+                GoToList();
+            }
         };
         btnBar.Add(okBtn);
 
         var cancelBtn = new IgiMenuButton(theme, "Cancel")
         {
             TextSize = 36f,
-            Height = 72f,
+            Height = RowHeightUnits,
             Width = 220f,
             NormalColor = Bgra32.FromRgb(80, 160, 255),
             HoverColor = Bgra32.FromRgb(228, 238, 252),
         };
         cancelBtn.Activated += () =>
         {
-            // Restore initial settings
-            Context.Host.TouchOpacity = _initialOpacity;
-            Context.Host.TouchSensitivity = _initialSensitivity;
-            Context.Host.RenderScaleMode = _initialRenderScale;
-            ReconstructionCVars.ViewDistance.Value = _initialViewDistance;
-            ReconstructionCVars.FrameLimit.Value = _initialFpsCap;
-            DisplayCVars.UiScale.Value = _initialUiScale;
-            DisplayCVars.TextScale.Value = _initialTextScale;
-            DisplayCVars.ShowFps.Value = _initialShowFps;
-            LightingCVars.SunBrightness.Value = _initialSunBrightness;
-            FrameCVars.SmoothPresentation.Value = _initialSmooth;
-            MaterialCVars.Anisotropy.Value = _initialAnisotropy;
-            MaterialCVars.PointMips.Value = _initialPointMips;
-            MaterialCVars.TextureQuality.Value = _initialTextureQuality;
-            CombatEffectCVars.MuzzleFlash.Value = _initialMuzzleFlash;
-            WeatherCVars.WeatherEnabled.Value = _initialWeather;
-            WeatherCVars.Storm.Value = _initialStorm;
-            HudCVars.CrosshairScale.Value = _initialCrosshairScale;
-            HudCVars.CrosshairColor.Value = _initialCrosshairColor;
-            HudCVars.CrosshairOutline.Value = _initialCrosshairOutline;
-            if (Context.Config.Active is { } profile)
-            {
-                profile.InvertMouse = _initialInvert;
-                profile.GyroEnabled = _initialGyro;
-                profile.GyroSensitivity = _initialGyroSensitivity;
-                profile.InvertGyro = _initialInvertGyro;
-            }
+            RestoreSnapshots();
             CloseConfig();
         };
         btnBar.Add(cancelBtn);
 
-        frame.AddChild(btnBar);
-        root.Add(frame, new Anchor(UiVec2.Zero, UiVec2.One, Thickness.Zero));
+        return btnBar;
+    }
 
-        return root;
+    /// <summary>Writes every setting to disk, and moves the Cancel snapshots to what was just saved.</summary>
+    private void SaveAll()
+    {
+        Context.Host.SaveSettings();
+
+        // Profiles carry Invert, Gyro and gyro sensitivity, which settings.cfg never wrote: OK
+        // used to leave them to the save on exit, so they were lost whenever the app was killed
+        // or swiped away after OK instead of quit cleanly.
+        Context.Host.SaveProfiles();
+        CaptureSnapshots();
+    }
+
+    /// <summary>Restores every live value to the entry-time (or last-OK) snapshots.</summary>
+    /// <remarks>
+    /// Save slots write at once and are explicitly exempt: a save is an action, not a setting.
+    /// </remarks>
+    private void RestoreSnapshots()
+    {
+        Context.Host.TouchOpacity = _initialOpacity;
+        Context.Host.TouchSensitivity = _initialSensitivity;
+        Context.Host.RenderScaleMode = _initialRenderScale;
+        ReconstructionCVars.ViewDistance.Value = _initialViewDistance;
+        ReconstructionCVars.FrameLimit.Value = _initialFpsCap;
+        DisplayCVars.UiScale.Value = _initialUiScale;
+        DisplayCVars.TextScale.Value = _initialTextScale;
+        DisplayCVars.ShowFps.Value = _initialShowFps;
+        LightingCVars.SunBrightness.Value = _initialSunBrightness;
+        FrameCVars.SmoothPresentation.Value = _initialSmooth;
+        MaterialCVars.Anisotropy.Value = _initialAnisotropy;
+        MaterialCVars.PointMips.Value = _initialPointMips;
+        MaterialCVars.TextureQuality.Value = _initialTextureQuality;
+        CombatEffectCVars.MuzzleFlash.Value = _initialMuzzleFlash;
+        WeatherCVars.WeatherEnabled.Value = _initialWeather;
+        WeatherCVars.Storm.Value = _initialStorm;
+        HudCVars.CrosshairScale.Value = _initialCrosshairScale;
+        HudCVars.CrosshairColor.Value = _initialCrosshairColor;
+        HudCVars.CrosshairOutline.Value = _initialCrosshairOutline;
+        if (Context.Config.Active is { } profile)
+        {
+            profile.InvertMouse = _initialInvert;
+            profile.GyroEnabled = _initialGyro;
+            profile.GyroSensitivity = _initialGyroSensitivity;
+            profile.InvertGyro = _initialInvertGyro;
+        }
+    }
+
+    /// <summary>Opens a sub-screen: the same instance rebuilds its tree for the section.</summary>
+    private void GoToSection(Section section)
+    {
+        _section = section;
+        Invalidate();
+    }
+
+    /// <summary>Returns to the section list without saving or discarding.</summary>
+    private void GoToList()
+    {
+        _section = Section.List;
+        Invalidate();
     }
 
     /// <summary>A save slot's row as the settings screen shows it: its number and what it holds, or that it is empty.</summary>
@@ -851,8 +1074,11 @@ public sealed class SettingsScreen : ShellScreen
     /// <inheritdoc/>
     protected override bool HandleInput(UiNavigation nav, InputState input)
     {
+        // Back is Cancel everywhere in Configuration: restore the snapshots and close, so a
+        // visit that changed sliders never leaves dirty values applied and unsaved.
         if (nav.Back)
         {
+            RestoreSnapshots();
             CloseConfig();
             return false;
         }
@@ -908,4 +1134,3 @@ public sealed class SettingsScreen : ShellScreen
         return base.HandleInput(nav, input);
     }
 }
-
