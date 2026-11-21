@@ -257,10 +257,14 @@ public sealed class TouchControls
     /// <summary>The stick's reach, in design units.</summary>
     public const float StickReach = 120f;
 
+    // Button radii, in physical pixels at the 1080p reference (touchScale divides the UI-size
+    // multiplier back out, so these are 1:1 with the back buffer): 63px radius is a 126px
+    // diameter, 48 dp at the ~400 dpi density the survey grounds (48 x 2.625). Fire stays
+    // larger at 80px radius (61 dp); the other three sizes all sit on the 48 dp floor.
     private const float FireRadius = 80f;
-    private const float ButtonRadius = 62f;
-    private const float SmallRadius = 50f;
-    private const float CornerRadius = 36f;
+    private const float ButtonRadius = 63f;
+    private const float SmallRadius = 63f;
+    private const float CornerRadius = 63f;
 
     private static readonly Dictionary<TouchElementId, TouchElementConfig> s_configs = [];
     private static bool s_loaded;
@@ -540,12 +544,16 @@ public sealed class TouchControls
         UiRect safe = context.SafeRect;
 
         float topY = safe.Y + Px(10f);
-        float btnH = Px(60f);
+        // Toolbar buttons, in design units through context.Px (Scale 1.2 at the 1080p
+        // reference): 105 units tall is 126px, the 48 dp floor at density 2.625, and the
+        // SIZE buttons are 110 units wide (132px, 50 dp) for the same reason. These boxes
+        // must match the ones DrawCustomizationOverlay draws, or taps and pictures drift.
+        float btnH = Px(105f);
         UiRect saveBox    = new(safe.Right - Px(230f), topY, Px(220f), btnH);
         UiRect resetBox   = new(safe.Right - Px(430f), topY, Px(190f), btnH);
-        UiRect sizePlus   = new(safe.Right - Px(540f), topY, Px(100f), btnH);
-        UiRect sizeMinus  = new(safe.Right - Px(650f), topY, Px(100f), btnH);
-        UiRect opacityBox = new(safe.Right - Px(840f), topY, Px(180f), btnH);
+        UiRect sizePlus   = new(safe.Right - Px(550f), topY, Px(110f), btnH);
+        UiRect sizeMinus  = new(safe.Right - Px(670f), topY, Px(110f), btnH);
+        UiRect opacityBox = new(safe.Right - Px(860f), topY, Px(180f), btnH);
 
         // Multi-touch pinch-to-zoom for real-time resizing of controls
         if (touch.Points.Count >= 2)
@@ -835,17 +843,23 @@ public sealed class TouchControls
         AddRound(TouchElementId.Jump, TouchButton.Jump, 300f, 430f, ButtonRadius);
         AddRound(TouchElementId.Crouch, TouchButton.Crouch, 110f, 170f, SmallRadius);
         AddRound(TouchElementId.Peek, TouchButton.Peek, 110f, 315f, SmallRadius);
-        AddRound(TouchElementId.ZoomIn, TouchButton.ZoomIn, 110f, 600f, CornerRadius);
-        AddRound(TouchElementId.ZoomOut, TouchButton.ZoomOut, 110f, 495f, CornerRadius);
+        AddRound(TouchElementId.ZoomIn, TouchButton.ZoomIn, 110f, 625f, CornerRadius);
+        AddRound(TouchElementId.ZoomOut, TouchButton.ZoomOut, 110f, 470f, CornerRadius);
+        // The zoom pair shares one column at right 110: the two sit 155 units apart, so at
+        // the 63px radius their circles keep a 29px gap (the old 105-unit step overlapped
+        // by 21px at the new size). Peek above ZoomOut keeps the same 155-unit step.
 
         // I.G.I. 2 stance buttons: a pair to the right of the movement stick,
         // clear of its reach. Tap to step the stance one level up or down;
         // prone is reached by stepping down from crouch, not by its own button.
         // The pair is I.G.I. 2 only and stays out of the layout under any other title.
+        // The two sit 140 units apart vertically: at the 63px radius their circles need
+        // 126 units between centres, so 140 leaves a 14px gap (the old 120-unit step
+        // overlapped by 6px at the new size).
         if (ShowIgi2Buttons)
         {
-            _layout.Add(new TouchButtonSpot(TouchButton.RaiseStance, ResolvePos(TouchElementId.StanceUp, new UiVec2(safe.X + Px(480f), safe.Bottom - Px(400f))), Px(SmallRadius) * Scale(TouchElementId.StanceUp), ElementId: TouchElementId.StanceUp));
-            _layout.Add(new TouchButtonSpot(TouchButton.LowerStance, ResolvePos(TouchElementId.StanceDown, new UiVec2(safe.X + Px(480f), safe.Bottom - Px(280f))), Px(SmallRadius) * Scale(TouchElementId.StanceDown), ElementId: TouchElementId.StanceDown));
+            _layout.Add(new TouchButtonSpot(TouchButton.RaiseStance, ResolvePos(TouchElementId.StanceUp, new UiVec2(safe.X + Px(480f), safe.Bottom - Px(410f))), Px(SmallRadius) * Scale(TouchElementId.StanceUp), ElementId: TouchElementId.StanceUp));
+            _layout.Add(new TouchButtonSpot(TouchButton.LowerStance, ResolvePos(TouchElementId.StanceDown, new UiVec2(safe.X + Px(480f), safe.Bottom - Px(270f))), Px(SmallRadius) * Scale(TouchElementId.StanceDown), ElementId: TouchElementId.StanceDown));
         }
 
         // Weapon (round, not a wide card: the wide rectangle was awkward to tap) and Use.

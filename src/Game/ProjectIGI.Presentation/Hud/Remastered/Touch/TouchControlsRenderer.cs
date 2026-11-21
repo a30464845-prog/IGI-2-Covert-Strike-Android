@@ -109,23 +109,26 @@ public static class TouchControlsRenderer
 
         // Top Toolbar background strip
         float topY = safe.Y + Px(8f);
-        float barH = Px(60f);
+        // The toolbar buttons are 105 units tall through context.Px (Scale 1.2 at the
+        // 1080p reference): 126px, the 48 dp floor at density 2.625. These boxes must
+        // match the ones UpdateCustomization hit-tests, or taps and pictures drift.
+        float barH = Px(105f);
         UiRect barRect = new(safe.X, safe.Y, safe.Width, barH + Px(16f));
         painter.FillRect(barRect, Bgra32.FromRgba(8, 10, 18, 230));
         painter.StrokeLine(new UiVec2(safe.X, barRect.Bottom), new UiVec2(safe.Right, barRect.Bottom), Px(1.5f), Rim);
 
-        // Header Title
+        // Header Title, centred in the taller bar
         if (font is not null)
         {
-            painter.DrawText(font, "TACTICAL HUD CONFIGURATION // DRAG TO MOVE", new UiVec2(safe.X + Px(16f), topY + Px(14f)), Px(22f), DefaultAccent);
+            painter.DrawText(font, "TACTICAL HUD CONFIGURATION // DRAG TO MOVE", new UiVec2(safe.X + Px(16f), topY + ((barH - Px(22f)) * 0.5f)), Px(22f), DefaultAccent);
         }
 
         // Toolbar Buttons
         UiRect saveBox    = new(safe.Right - Px(230f), topY, Px(220f), barH);
         UiRect resetBox   = new(safe.Right - Px(430f), topY, Px(190f), barH);
-        UiRect sizePlus   = new(safe.Right - Px(540f), topY, Px(100f), barH);
-        UiRect sizeMinus  = new(safe.Right - Px(650f), topY, Px(100f), barH);
-        UiRect opacityBox = new(safe.Right - Px(840f), topY, Px(180f), barH);
+        UiRect sizePlus   = new(safe.Right - Px(550f), topY, Px(110f), barH);
+        UiRect sizeMinus  = new(safe.Right - Px(670f), topY, Px(110f), barH);
+        UiRect opacityBox = new(safe.Right - Px(860f), topY, Px(180f), barH);
 
         DrawToolButton(painter, saveBox, "SAVE & EXIT", font, Px(19f), fillAccent: true);
         DrawToolButton(painter, resetBox, "RESET", font, Px(18f));
