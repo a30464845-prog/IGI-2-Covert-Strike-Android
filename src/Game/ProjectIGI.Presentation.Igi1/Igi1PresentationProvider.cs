@@ -248,8 +248,12 @@ public sealed class Igi1PresentationProvider : ITitlePresentationProvider
         ?? throw new InvalidOperationException(
             "Project I.G.I.'s view model needs its magic-object table, and the request carries none.");
 
-    /// <inheritdoc/>
-    private IBulletMarkPresenter CreateBulletMarks(in EffectsPresentationRequest request) =>
+    /// <summary>Makes the marks' presenter.</summary>
+    /// <remarks>
+    /// Public so I.G.I. 2's provider can register the same presenter: the renderer itself stays
+    /// internal, and this hands out only the interface.
+    /// </remarks>
+    public static IBulletMarkPresenter CreateBulletMarks(in EffectsPresentationRequest request) =>
         new BulletMarkRenderer(request.Device, request.Resources, request.Logger);
 
     /// <inheritdoc/>

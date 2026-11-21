@@ -1,8 +1,11 @@
 using ProjectIGI.Core.Numerics;
 using ProjectIGI.Game.Igi2.Audio;
+using ProjectIGI.Game.Igi2.Collision;
 using ProjectIGI.Game.Igi2.Weapons;
 using ProjectIGI.Game.Igi2.World;
 using ProjectIGI.Game.Physics;
+using ProjectIGI.Game.Weapons;
+using ProjectIGI.Game.World;
 using ProjectIGI.Game.World.Particles;
 
 namespace ProjectIGI.Game.Igi2.Player;
@@ -10,7 +13,8 @@ namespace ProjectIGI.Game.Igi2.Player;
 /// <summary>What a bullet's flight sounds in the level; what it shows arrives with its presentation.</summary>
 /// <param name="sounds">The level's sounds.</param>
 /// <param name="ai">The session's AI, which hears the events, or <see langword="null"/>.</param>
-internal sealed class Igi2LevelImpactEffects(Igi2Sounds sounds, Ai.Runtime.Igi2AiWorld? ai = null) : IIgi2GunShotEffects
+/// <param name="marks">Where a bullet's holes go, or <see langword="null"/> when nothing records them.</param>
+internal sealed class Igi2LevelImpactEffects(Igi2Sounds sounds, Ai.Runtime.Igi2AiWorld? ai = null, BulletMarks? marks = null) : IIgi2GunShotEffects
 {
     /// <inheritdoc/>
     public bool NewSound(string sound, Vector3d position) => sounds.New(sound, position) is not null;
@@ -81,6 +85,25 @@ internal sealed class Igi2LevelImpactEffects(Igi2Sounds sounds, Ai.Runtime.Igi2A
     /// <inheritdoc/>
     public void BulletHole(in Igi2BulletHoleMark hole)
     {
+        if (marks is null || !Igi2BulletHoles.Takes(hole.Struck))
+        {
+            return;
+        }
+
+        // The same five millimetres IGI 1 lifts a mark off its surface
+        // (BulletMarks.Lift / GunShotBallistics.PenetrationStepOffUnits), so the quad does not
+        // z-fight the wall it sits on.
+        Vector3f n = hole.Intersection.Normal.NormalizedOr(Vector3f.UnitZ, 1e-6f);
+        Vector3d at = new(
+            hole.Intersection.Position.X + (n.X * GunShotBallistics.PenetrationStepOffUnits),
+            hole.Intersection.Position.Y + (n.Y * GunShotBallistics.PenetrationStepOffUnits),
+            hole.Intersection.Position.Z + (n.Z * GunShotBallistics.PenetrationStepOffUnits));
+
+        // hole.Size is vBulletHoleSize in world units, passed through as the half-width exactly as
+        // IGI 1 passes its material's SizeInUnits: 0x47D920 lays the decal's corners at +-size.
+        // No placement is resolved yet (v1): the mark stays where it was made rather than riding a
+        // moving door, and there is no corner probe, so one may overhang an edge.
+        marks.AddMark(at, n, hole.Texture, hole.Size, surface: hole.Struck, placement: null);
     }
 
     /// <inheritdoc/>

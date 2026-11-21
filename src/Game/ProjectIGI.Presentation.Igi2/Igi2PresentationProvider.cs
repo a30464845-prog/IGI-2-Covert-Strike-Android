@@ -6,9 +6,11 @@ using ProjectIGI.Game.World;
 using ProjectIGI.Engine.Resources;
 using ProjectIGI.Engine.Tasks;
 using ProjectIGI.Formats.Ilff;
+using ProjectIGI.Game.Igi2.Player;
 using ProjectIGI.Game.Igi2.ViewModel;
 using ProjectIGI.Game.Igi2.World;
 using ProjectIGI.Presentation;
+using ProjectIGI.Presentation.Igi1;
 using ProjectIGI.Rendering;
 using ProjectIGI.Presentation.Rendering;
 using ProjectIGI.Game.Igi2;
@@ -63,7 +65,10 @@ public sealed class Igi2PresentationProvider : ITitlePresentationProvider
 
             // The remastered computer is both games' own: the shared display, fed whichever mission's objectives there are.
             .Add<MapComputerPresentationRequest, ITacticalComputerPresenter>(static (in MapComputerPresentationRequest request) =>
-                new TacticalComputerRenderer(request.Device, request.Resources, request.Logger, request.ResolveText));
+                new TacticalComputerRenderer(request.Device, request.Resources, request.Logger, request.ResolveText))
+            .Add<MissionPresentationRequest, IMissionWorldView>(static (in MissionPresentationRequest request) =>
+                request.Gameplay is Igi2Gameplay gameplay ? new Igi2WorldView(gameplay) : null)
+            .Add<EffectsPresentationRequest, IBulletMarkPresenter>(Igi1PresentationProvider.CreateBulletMarks);
 
     /// <inheritdoc/>
     public PresenterRegistry Presenters { get; }

@@ -46,6 +46,9 @@ public readonly record struct BulletMark(
     Vector3d LocalPosition = default,
     Vector3f LocalNormal = default)
 {
+    /// <summary>Gets the wall-clock tick the mark was recorded on; <c>0</c> when it was not stamped.</summary>
+    public long AddedTicks { get; init; }
+
     /// <summary>Works out where the mark is now.</summary>
     /// <param name="poses">Where placements are now, or <see langword="null"/> to use where it was made.</param>
     /// <param name="position">Receives its position, in world units.</param>
@@ -94,6 +97,12 @@ public readonly record struct BulletMark(
 /// <c>SplineObjSegment</c>. Several descendants register a null handler to refuse it — see
 /// <see cref="RefusesMarks(GameTask?, WorldPlacement?)"/>. Terrain has no object at all: the trace's
 /// terrain pass zeroes the struck task (<c>0x4CC2A0</c>), so the ground is never marked.
+/// </para>
+/// <para>
+/// <b>Marks fade.</b> Retail's never leave the world; on a phone a firefight must not grow the draw
+/// list forever, so a mark holds full opacity for <see cref="FadeHoldSeconds"/> seconds, fades over
+/// <see cref="FadeDurationSeconds"/> more, and is gone at <see cref="MarkLifetimeSeconds"/>.
+/// The store still caps as the original does, and expired marks are pruned when the next one lands.
 /// </para>
 /// <para>
 /// Everything else is <c>0x47D380</c>'s own bookkeeping, reproduced by <see cref="Add"/>. Marks are
@@ -149,6 +158,30 @@ public sealed class BulletMarks
     /// does not report which object it met, so they cannot join an object's own list yet.
     /// </remarks>
     public const int DefaultCapacity = 512;
+
+    /// <summary>How long a mark draws at full opacity before it starts to fade, in seconds.</summary>
+    public const float FadeHoldSeconds = 30f;
+
+    /// <summary>How long a mark takes to fade to nothing once it starts, in seconds.</summary>
+    public const float FadeDurationSeconds = 30f;
+
+    /// <summary>How long a mark lives in total, in seconds: full opacity, then the fade.</summary>
+    public const float MarkLifetimeSeconds = FadeHoldSeconds + FadeDurationSeconds;
+
+    /// <summary>How opaque a mark of this age draws: 1 while young, fading to 0 at its lifetime.</summary>
+    /// <param name="ageSeconds">How long the mark has been in the world, in seconds.</param>
+    /// <returns>The opacity, 0 once the mark is gone.</returns>
+    public static float AlphaAtAge(double ageSeconds) =>
+        ageSeconds <= FadeHoldSeconds
+            ? 1f
+            : Math.Clamp(1f - (float)((ageSeconds - FadeHoldSeconds) / FadeDurationSeconds), 0f, 1f);
+
+    /// <summary>How old a mark stamped at one tick is at another, in seconds.</summary>
+    /// <param name="addedTicks">The tick the mark was recorded on, or 0 for an unstamped one.</param>
+    /// <param name="nowTicks">The tick to measure to, from the same clock.</param>
+    /// <returns>Zero for an unstamped mark, else the elapsed seconds.</returns>
+    public static double AgeSeconds(long addedTicks, long nowTicks) =>
+        addedTicks == 0 ? 0.0 : (nowTicks - addedTicks) / 1000.0;
 
     /// <summary>The shared Concrete row name used when a hit names a row the table does not hold.</summary>
     /// <remarks>
@@ -412,6 +445,9 @@ public sealed class BulletMarks
 
     private bool Add(BulletMark mark)
     {
+        PruneExpired();
+        mark = mark with { AddedTicks = Environment.TickCount64 };
+
         if (mark.Surface is not { } key)
         {
             if (_marks.Count(static m => m.Surface is null) >= _unownedCapacity)
@@ -489,6 +525,31 @@ public sealed class BulletMarks
         _marks.Add(mark);
         TotalAdded++;
         return true;
+    }
+
+    /// <summary>Drops marks past their lifetime, and the surface entries left with nothing on them.</summary>
+    /// <remarks>
+    /// Run when the next mark lands, so a firefight's oldest holes leave the store instead of
+    /// waiting for their surface's cap to evict them. The renderer also skips a fully faded mark,
+    /// so one that outlives its stamp by a frame or two never draws.
+    /// </remarks>
+    private void PruneExpired()
+    {
+        if (_marks.Count == 0)
+        {
+            return;
+        }
+
+        long now = Environment.TickCount64;
+        _marks.RemoveAll(mark =>
+            mark.AddedTicks != 0 && AgeSeconds(mark.AddedTicks, now) > MarkLifetimeSeconds);
+        if (_marks.Count == 0)
+        {
+            _surfaces.Clear();
+            return;
+        }
+
+        _surfaces.RemoveAll(entry => !_marks.Any(m => ReferenceEquals(m.Surface, entry.Key)));
     }
 
     /// <summary>Takes a point from a placement's frame into the world.</summary>
