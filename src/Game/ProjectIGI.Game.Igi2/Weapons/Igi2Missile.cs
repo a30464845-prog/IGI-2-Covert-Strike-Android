@@ -151,6 +151,13 @@ public sealed class Igi2Missile : IDynamicTask
             _smoke = explosions.Particles?.New(
                 missile.SmokeSprite, false, 0, new Vector3f(0f, 0f, 0.02177777700126171f), new Vector3f(12.7f, 12.7f, 12.7f),
                 missile.SmokeSize, missile.SmokeSize, 2048000f, 0x1000008, 0, growth, 0f, 2000, null);
+            if (_smoke is { } smoke)
+            {
+                // The system is made empty and filled a puff at a time by AddSmoke, so it must not
+                // self-destruct on its first empty tick: as a smoke plume's does (Igi2SmokeTask), the
+                // missile owns its trail while it flies and lets it go once it is gone.
+                smoke.IsSelfDestruct = false;
+            }
         }
     }
 
@@ -191,6 +198,11 @@ public sealed class Igi2Missile : IDynamicTask
             // Missile_DeleteHandler: its sound goes with it.
             FlightSound?.Delete();
             FlightSound = null;
+            // The trail is done being fed: let its system go once its last puffs have faded.
+            if (_smoke is { } smoke)
+            {
+                smoke.IsSelfDestruct = true;
+            }
         }
 
         return flying;
