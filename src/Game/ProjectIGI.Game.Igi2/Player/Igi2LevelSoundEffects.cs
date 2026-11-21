@@ -1,7 +1,9 @@
 using ProjectIGI.Core.Numerics;
 using ProjectIGI.Game.Igi2.Audio;
 using ProjectIGI.Game.Igi2.Weapons;
+using ProjectIGI.Game.Igi2.World;
 using ProjectIGI.Game.Physics;
+using ProjectIGI.Game.World.Particles;
 
 namespace ProjectIGI.Game.Igi2.Player;
 
@@ -24,6 +26,12 @@ internal sealed class Igi2LevelImpactEffects(Igi2Sounds sounds, Ai.Runtime.Igi2A
 
     /// <summary>Gets or sets where an impact's chips fly, an explosion of no damage, or <see langword="null"/> for none.</summary>
     public Igi2ExplosionWorld? Explosions { get; set; }
+
+    /// <summary>The impact puff's sprite: IGI 1's <c>PuffSprite</c>, the grey dust its puffs rise as.</summary>
+    public const string SmokeSprite = "concrete1.spr";
+
+    /// <summary>Gets or sets the level's particle engine, whose systems the title-particle drawer shows.</summary>
+    public Igi2Particles? Particles { get; set; }
 
     /// <inheritdoc/>
     /// <remarks>
@@ -78,6 +86,24 @@ internal sealed class Igi2LevelImpactEffects(Igi2Sounds sounds, Ai.Runtime.Igi2A
     /// <inheritdoc/>
     public void Smoke(in Igi2ImpactSmoke smoke)
     {
+        if (Particles is not { } particles)
+        {
+            return;
+        }
+
+        // IGI 1's GunShotImpactEffects.PuffLook / ImpactEffectRuntime.Puff: one two-particle
+        // system per impact, grey, growing 0.08888889/tick, holding 15 ticks, fading over 30.
+        // Size is the weapon's Smoke Particle Size, already in world units (Igi2GunShotEffect).
+        Particle2DSystem puff = particles.New(
+            SmokeSprite, animated: false, frames: 1,
+            acceleration: Vector3f.Zero,
+            color: new Vector3f(127f, 127f, 127f),
+            width: smoke.Size, height: smoke.Size, range: 409600f,
+            transparency: Particle2DFlags.Filtered | Particle2DFlags.FadesByOpacity,
+            animationDelta: 0, sizeDelta: 0.08888889f, shininess: 0f,
+            maxParticles: 2, onCollision: null);
+        puff.AddParticle(smoke.First, new Vector3f(0f, 0f, smoke.FirstRise), smoke.Intensity, smoke.FirstSpin, 0f, 1f, 15, 30);
+        puff.AddParticle(smoke.Second, new Vector3f(0f, 0f, smoke.SecondRise), smoke.Intensity, smoke.SecondSpin, 0f, 1f, 15, 30);
     }
 }
 

@@ -305,6 +305,20 @@ public sealed class Igi2Gameplay : ITitleGameplay
                 surroundings.Particles = particles;
             }
         }
+        if (weapons?.ImpactEffects is Igi2LevelImpactEffects playerImpacts)
+        {
+            playerImpacts.Particles = particles;
+        }
+        if (player.Soldiers is { } soldiers)
+        {
+            foreach (Soldiers.Igi2HumanSoldier body in soldiers.Bodies)
+            {
+                if (body.Weapon is Igi2PlayerWeapons arms && arms.ImpactEffects is Igi2LevelImpactEffects impacts)
+                {
+                    impacts.Particles = particles;
+                }
+            }
+        }
 
         player.MapHumans = humans;
         player.MissionId = request.World.Mission.Descriptor.Id;
