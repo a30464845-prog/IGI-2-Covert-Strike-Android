@@ -28,8 +28,8 @@ public sealed class SettingsScreen : ShellScreen
     private static readonly int[] FpsCapValues = [30, 60, 90, 120, 0];
     private static readonly string[] FpsCapLabels = ["30 FPS", "60 FPS", "90 FPS", "120 FPS", "UNCAPPED"];
     private static readonly string[] RenderScaleLabels = ["540P (ULTRA)", "720P (PERFORMANCE)", "900P (BALANCED)", "NATIVE (MAX)"];
-    private static readonly float[] ViewDistanceValues = [1f, 0.1f, 0.025f];
-    private static readonly string[] ViewDistanceLabels = ["FAR", "MEDIUM", "NEAR"];
+    private static readonly float[] ViewDistanceValues = [1f, 0.5f, 0.1f, 0.025f];
+    private static readonly string[] ViewDistanceLabels = ["FAR", "50%", "MEDIUM", "NEAR"];
     private static readonly int[] AnisotropyValues = [1, 4, 8, 16];
     private static readonly string[] AnisotropyLabels = ["OFF", "4X", "8X", "16X"];
     private static readonly string[] TextureQualityLabels = ["LOW", "MEDIUM", "HIGH"];
@@ -444,7 +444,7 @@ public sealed class SettingsScreen : ShellScreen
         configStack.AddChild(resCycler);
 
         // ── View Distance: how far the world draws ──────────────────────────────
-        // Shortens the far plane: Far is the original's 100 km, Medium 10 km, Near 2.5 km. The
+        // Shortens the far plane: Far is the original's 100 km, 50% is 50 km, Medium 10 km, Near 2.5 km. The
         // original's own fog hides everything past about two and a half kilometres anyway, so Near
         // loses almost nothing visible and skips drawing what the fog would have hidden. The sky dome
         // sizes itself to the far plane, so it stays put, and the held weapon sits centimetres away,
@@ -464,7 +464,7 @@ public sealed class SettingsScreen : ShellScreen
             Width = 1150f,
             Height = 68f,
             ContentWidth = 320f,
-            Tooltip = "How far the world draws. Near (2.5 km) skips what the original's fog hides anyway; Far is the original's 100 km.",
+            Tooltip = "How far the world draws. Near (2.5 km) skips what the original's fog hides anyway; 50% is 50 km; Far is the original's 100 km.",
         };
         viewDistanceCycler.SelectionChanged += index =>
         {
