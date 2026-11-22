@@ -40,6 +40,11 @@ public sealed partial class Igi2HumanAi
     /// Reads its save state back, <c>HumanAI_DeSerializeHandler</c>: its detection, events and actions are cleared and its weight moved
     /// to its saved node; its channels are let go, its view is the idle one, and its search and movement are dropped; its patrols are
     /// found again by id; and a soldier that was patrolling with somewhere to go patrols again, its way there searched from its node.
+    /// Its started flag is not put back: the saved bit says whether the mind had run in the saved game, not whether this mind has run
+    /// in this level, and a mind loaded from the menu is fresh — it has never run its creation (event 0), the only place its script
+    /// first runs and declares its event priorities (<c>AIFunction_SetEventPriority</c>). Forcing it started leaves it with no
+    /// priorities, so <c>RunScript</c> can never dispatch and every event is dropped: the soldier stands still, hearing nothing,
+    /// for the rest of the level. It stays not started until its first tick, when its creation runs.
     /// </summary>
     /// <param name="reader">The reader.</param>
     public void ReadState(Igi2StateReader reader)
@@ -53,6 +58,8 @@ public sealed partial class Igi2HumanAi
         Events.Clear();
         Actions.Clear(this);
         Flags = reader.Int();
+        // Read and left alone: whether the mind had run in the saved game. This mind's own flag — whether it has run its
+        // creation in this level — is what governs, and a fresh mind must run it; see the remarks above.
         reader.Bool();
         IgnoreVisibilityFactorTimer = reader.Int();
         int current = reader.Int();
@@ -68,7 +75,6 @@ public sealed partial class Igi2HumanAi
         }
 
         SetCurrentNode(current);
-        HasStarted = true;
         for (int i = 0; i < 11; i++)
         {
             SetChannel(i, 0f);
