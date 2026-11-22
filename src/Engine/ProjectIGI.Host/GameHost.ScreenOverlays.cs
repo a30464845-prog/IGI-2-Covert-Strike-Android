@@ -389,7 +389,15 @@ public sealed partial class GameHost
             state.Batch.End();
         }
 
-        DrawTouchControls(state);
+        // While the touch controls are being customised, the presentation pass draws
+        // them (DrawPresentation's IsCustomizing branch, which also runs with no
+        // level loaded). Drawing them here as well painted the whole customisation
+        // overlay twice per frame and overflowed the 2D geometry ring.
+        if (!ProjectIGI.Presentation.Hud.Remastered.Touch.TouchControls.IsCustomizing)
+        {
+            DrawTouchControls(state);
+        }
+
         DrawCutsceneSkip(state);
 
         _device.EndStageTiming();
