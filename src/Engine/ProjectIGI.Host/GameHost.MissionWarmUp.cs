@@ -598,17 +598,24 @@ public sealed partial class GameHost
         }
 
         // 3. The bottom progress bar's geometry, needed to place the text block above it.
-        Bgra32 brightGreen = Bgra32.FromRgb(80, 160, 255); // #39e365
+        // A dark pill with a segmented ring gauge at its left end, after the reference
+        // widget: the ring stands a little proud of the pill, top and bottom.
         float barMargin = 32f * scale;
         float barWidth = width - (barMargin * 2f);
-        float barHeight = 8f * scale;
-        float barY = height - (20f * scale) - barHeight;
+        float pillHeight = 34f * scale;
+        float pillY = height - (18f * scale) - pillHeight;
+        float pillCentreY = pillY + (pillHeight * 0.5f);
+        float ringRadius = 27f * scale;
+        float ringCentreX = barMargin + ringRadius - (2f * scale);
+        float ringCentreY = pillCentreY;
+        float barTop = pillY - (ringRadius - (pillHeight * 0.5f));
         float progress = Math.Clamp(_warmUp.Progress, 0.05f, 1f);
+        string pctText = FormattableString.Invariant($"{(int)(progress * 100f)}%");
 
         // 4. The text block, stacked from the bar upward: kicker, name, rule, description.
         // Laid out first so the scrim behind it knows where the block starts.
         float left = width * 0.085f;
-        float labelY = barY - (17f * scale);
+        float labelY = barTop - (17f * scale);
         float labelSize = 13f * scale;
         float blockTop = labelY;
         float kickerTop = 0f;
@@ -678,24 +685,89 @@ public sealed partial class GameHost
             painter.FillGradient(new UiRect(0f, scrimTop, width, height - scrimTop), scrim, UI.Drawing.UiGradientDirection.Vertical);
         }
 
-        // 6. Classic Authentic IGI Phosphor Green Bottom Progress Bar
-        // Progress bar background track & border
-        painter.FillRect(new UiRect(barMargin, barY, barWidth, barHeight), Bgra32.FromRgb(15, 28, 55));
-        painter.FillRect(new UiRect(barMargin - 1f, barY - 1f, barWidth + 2f, 1f), new Bgra32(120, 180, 255, 100));
-        painter.FillRect(new UiRect(barMargin - 1f, barY + barHeight, barWidth + 2f, 1f), new Bgra32(120, 180, 255, 100));
+        // 6. The progress bar, redesigned after the reference widget: a dark pill with a
+        // segmented ring gauge at its left end, a recessed track, and a bright blue fill
+        // with a glowing dot at its leading edge. The fill, the ring and both percentage
+        // labels all read the same progress.
+        Bgra32 barBlueDeep = Bgra32.FromRgb(30, 80, 200);
+        Bgra32 barBlueBright = Bgra32.FromRgb(125, 205, 252);
+        Bgra32 ringActive = Bgra32.FromRgb(96, 165, 250);
+        Bgra32 ringIdle = Bgra32.FromRgb(52, 68, 96);
 
-        // Green progress fill
-        painter.FillRect(new UiRect(barMargin, barY, barWidth * progress, barHeight), brightGreen);
-
-        // Animated glowing sweep effect across progress bar
-        float sweep = (seconds * 0.75f) % 1.5f;
-        float glowWidth = barWidth * 0.16f;
-        float glowLeft = barMargin + (barWidth * (sweep - 0.16f));
-        float glowRight = MathF.Min(glowLeft + glowWidth, barMargin + (barWidth * progress));
-        glowLeft = MathF.Max(glowLeft, barMargin);
-        if (glowRight > glowLeft)
+        // A capsule is a middle rect with a disc at either end; the pill, its outline and
+        // the track are all built that way, so no rounded-sprite slice is needed.
+        void Capsule(float x, float y, float w, float h, Bgra32 color)
         {
-            painter.FillRect(new UiRect(glowLeft, barY, glowRight - glowLeft, barHeight), Bgra32.White);
+            float r = h * 0.5f;
+            painter.FillRect(new UiRect(x + r, y, MathF.Max(0f, w - (r * 2f)), h), color);
+            painter.FillArc(new UiVec2(x + r, y + r), 0f, r, 0f, MathF.Tau, color);
+            painter.FillArc(new UiVec2(x + w - r, y + r), 0f, r, 0f, MathF.Tau, color);
+        }
+
+        // The pill: a thin lighter outline behind, then the near-black body.
+        Capsule(barMargin - (1f * scale), pillY - (1f * scale), barWidth + (2f * scale), pillHeight + (2f * scale), Bgra32.FromRgb(72, 98, 135));
+        Capsule(barMargin, pillY, barWidth, pillHeight, Bgra32.FromRgb(13, 16, 23));
+
+        // The recessed track, darker than the pill, running from the ring to near the
+        // pill's right end.
+        float trackHeight = 14f * scale;
+        float trackY = pillCentreY - (trackHeight * 0.5f);
+        float trackX = ringCentreX + ringRadius + (8f * scale);
+        float trackRight = barMargin + barWidth - (14f * scale);
+        float trackWidth = trackRight - trackX;
+        Capsule(trackX, trackY, trackWidth, trackHeight, Bgra32.FromRgb(7, 10, 16));
+
+        // The fill: a horizontal blue gradient between two end caps, so the capsule keeps
+        // its rounded ends at any length.
+        float fillLength = MathF.Max(trackHeight, trackWidth * progress);
+        float fillRight = trackX + fillLength;
+        float fillRadius = trackHeight * 0.5f;
+        Span<UI.Drawing.UiGradientStop> fillStops =
+        [
+            new(0f, barBlueDeep),
+            new(0.55f, Bgra32.FromRgb(56, 130, 246)),
+            new(1f, barBlueBright),
+        ];
+        painter.FillGradient(
+            new UiRect(trackX + fillRadius, trackY, MathF.Max(0f, fillLength - (fillRadius * 2f)), trackHeight),
+            fillStops,
+            UI.Drawing.UiGradientDirection.Horizontal);
+        painter.FillArc(new UiVec2(trackX + fillRadius, pillCentreY), 0f, fillRadius, 0f, MathF.Tau, barBlueDeep);
+        painter.FillArc(new UiVec2(fillRight - fillRadius, pillCentreY), 0f, fillRadius, 0f, MathF.Tau, barBlueBright);
+
+        // A soft glow and a bright dot at the fill's leading edge.
+        UiVec2 knobCentre = new(fillRight - fillRadius, pillCentreY);
+        painter.FillArc(knobCentre, 0f, fillRadius + (4f * scale), 0f, MathF.Tau, new Bgra32(96, 165, 250, 70));
+        painter.FillArc(knobCentre, 0f, fillRadius + (1.5f * scale), 0f, MathF.Tau, Bgra32.FromRgb(205, 235, 255));
+
+        // The ring gauge: 24 segments with small gaps between them, filled clockwise
+        // from the top; the lit share is the progress.
+        const int ringSegments = 24;
+        float ringStep = MathF.Tau / ringSegments;
+        float ringGap = 0.05f;
+        float ringInner = ringRadius - (5f * scale);
+        int litSegments = Math.Clamp((int)MathF.Round(progress * ringSegments), 0, ringSegments);
+        UiVec2 ringCentre = new(ringCentreX, ringCentreY);
+        for (int i = 0; i < ringSegments; i++)
+        {
+            float from = (i * ringStep) + (ringGap * 0.5f);
+            float to = ((i + 1) * ringStep) - (ringGap * 0.5f);
+            painter.FillArc(ringCentre, ringInner, ringRadius, from, to, i < litSegments ? ringActive : ringIdle);
+        }
+
+        // The percentage in the ring's centre, in the shell's mono face.
+        if (_shellType is { } shell)
+        {
+            float ringPctSize = 15f * scale;
+            float ringPctWidth = UiPainter.MeasureLabel(shell.Mono, pctText, ringPctSize, 0f);
+            UiRect ringPctBox = new(ringCentreX - ringRadius, ringCentreY - ringRadius, ringRadius * 2f, ringRadius * 2f);
+            painter.DrawLabel(
+                shell.Mono,
+                pctText,
+                new UiVec2(ringCentreX - (ringPctWidth * 0.5f), UiRowStyle.CapsCenterY(shell.Mono, ringPctSize, ringPctBox)),
+                ringPctSize,
+                Bgra32.FromRgb(235, 242, 255),
+                0f);
         }
 
         // 7. The mission block and the labels above the progress bar.
@@ -733,10 +805,9 @@ public sealed partial class GameHost
             string dotStr = new('.', dots);
             painter.DrawLabel(st.Mono, $"◆ {stage.ToUpperInvariant()}{dotStr}", new UiVec2(barMargin, labelY), labelSize, Bgra32.FromRgb(110, 160, 210), 0.18f);
 
-            // Right: percentage
-            string pct = FormattableString.Invariant($"{(int)(progress * 100f)}%");
-            float pctW = st.Mono.MeasureWidth(pct, labelSize);
-            painter.DrawText(st.Mono, pct, new UiVec2(barMargin + barWidth - pctW, labelY), labelSize, Bgra32.FromRgb(180, 205, 240));
+            // Right: percentage, in the accent blue, above the bar's right end.
+            float pctW = st.Mono.MeasureWidth(pctText, labelSize);
+            painter.DrawText(st.Mono, pctText, new UiVec2(barMargin + barWidth - pctW, labelY), labelSize, CardAccent);
         }
 
         batch.End();
