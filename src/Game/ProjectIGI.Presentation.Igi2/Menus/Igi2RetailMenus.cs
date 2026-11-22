@@ -1,9 +1,6 @@
-using System.IO;
-using ProjectIGI.Core.Configuration;
 using ProjectIGI.Core.Diagnostics;
 using ProjectIGI.Engine.Tasks;
 using ProjectIGI.Engine.Titles;
-using ProjectIGI.Formats.Sprites;
 using ProjectIGI.Game.Igi2.Config;
 using ProjectIGI.Game.Igi2.Menus;
 using ProjectIGI.Game.Igi2.Saves;
@@ -26,7 +23,6 @@ internal sealed class Igi2RetailMenus : IRetailMenus
 {
     private readonly RetailMenuHost _shell;
     private readonly MenuSystem _menu;
-    private readonly SpriteResource? _missionSelectBackground;
     private readonly Igi2GameConfig _config;
 
     /// <summary>Initializes a new instance of the <see cref="Igi2RetailMenus"/> class, and starts the menu script.</summary>
@@ -65,7 +61,6 @@ internal sealed class Igi2RetailMenus : IRetailMenus
         menu.Manager.SetDialect(MenuManagerDialect.Igi2);
 
         Action<bool> leave = request.Leave;
-        _missionSelectBackground = LoadMissionSelectBackground(request);
         _shell = new RetailMenuHost(new RetailMenuPresentationRequest(
             request.Device,
             request.FileSystem,
@@ -88,8 +83,7 @@ internal sealed class Igi2RetailMenus : IRetailMenus
             // I.G.I. 2's own colour table, and none of the shared green chrome: no BackgroundFx
             // overlay, and the screen panel draws in blue. The presenter is where the title is
             // known, so it is set here.
-            MenuStyle.Igi2,
-            MissionSelectBackground: _missionSelectBackground));
+            MenuStyle.Igi2));
 
         // The script passes 904 as "Current menuscreen": the screen it actually opens on comes
         // from its default-screen expression, Flow_IsPlayCredits() ? 916 : 923, which the shared
@@ -234,50 +228,6 @@ internal sealed class Igi2RetailMenus : IRetailMenus
     /// <inheritdoc/>
     public int ActiveMenuScreen => _menu.Manager.Navigator.CurrentScreen;
 
-    /// <summary>Loads the mission-select screen's cover art out of the app's own files.</summary>
-    /// <remarks>
-    /// The art is the game's cover, not retail data, so it ships in the APK under
-    /// <c>public/Assets/menu_images/igi2-cover.jpg</c> and MainActivity extracts it into the app's
-    /// files directory. The candidates mirror the old loading splash's file hunt: the user directory,
-    /// then the extracted asset folders, then the package's files directory outright. Missing art is
-    /// not an error — the screen falls back to the script's <c>mainmenu.jpg</c> background.
-    /// </remarks>
-    private static SpriteResource? LoadMissionSelectBackground(in RetailMenusRequest request)
-    {
-        string userDir = SettingsPaths.GetUserDirectory();
-        string[] paths =
-        [
-            Path.Combine(userDir, "Assets", "menu_images", "igi2-cover.jpg"),
-            Path.Combine(userDir, "menu_images", "igi2-cover.jpg"),
-            "/data/user/0/com.projectigi2.app/files/Assets/menu_images/igi2-cover.jpg",
-            "/data/user/0/com.projectigi2.app/files/managed/Assets/menu_images/igi2-cover.jpg",
-            "/data/user/0/com.projectigi2.app/files/menu_images/igi2-cover.jpg",
-        ];
-
-        foreach (string path in paths)
-        {
-            try
-            {
-                if (!File.Exists(path))
-                {
-                    continue;
-                }
-
-                SpriteResource background = SpriteResource.Upload(
-                    request.Device,
-                    SpriteLoader.Load(File.ReadAllBytes(path), "igi2-cover.jpg"));
-                request.Logger.Information("Menu", $"Loaded mission-select background from: {path}.");
-                return background;
-            }
-            catch (Exception ex)
-            {
-                request.Logger.Warning("Menu", $"Failed to load mission-select background from {path}: {ex.Message}");
-            }
-        }
-
-        return null;
-    }
-
     /// <inheritdoc/>
     public void CloseScreens() => _shell.CloseScreens();
 
@@ -298,6 +248,5 @@ internal sealed class Igi2RetailMenus : IRetailMenus
     public void Dispose()
     {
         _shell.Dispose();
-        _missionSelectBackground?.Dispose();
     }
 }
