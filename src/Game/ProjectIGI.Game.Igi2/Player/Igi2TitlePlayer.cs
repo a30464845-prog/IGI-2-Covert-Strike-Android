@@ -728,6 +728,8 @@ public sealed partial class Igi2TitlePlayer : ITitlePlayer, ITitleFirstPerson, I
         Human.Pickups?.Run();
         Human.View.RunZoom();
         if (Human.UnfilteredMouse) { WriteSmoothLook(); }
+        // The cutscene climb driver reads whether a cutscene is running from the player.
+        Human.IsCutsceneRunning = IsCutscenePlaying;
         Human.Ticks = (int)_ticks;
         Human.Update(_frame);
         Human.RunDelayed();
