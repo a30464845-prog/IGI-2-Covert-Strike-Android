@@ -278,6 +278,12 @@ public sealed partial class Igi2EditBoneObjTask : Igi2Task, IIgi2PlacedTask, Ani
             _current.SetAnimationAndTime(clip, 0);
             _current.TimeStep = Fpu.ToInt32((Fpu)TimeFactor * (double)Igi2AnimController.TicksPerFrame);
         }
+        else
+        {
+            // A clip that does not resolve ends at once, so the list moves on to the next instead of
+            // standing on the missing clip in the bind pose for the whole scene.
+            _current.Flags |= Igi2AnimControllerBits.Ended;
+        }
     }
 
     private void RunBlink()
