@@ -1,6 +1,7 @@
 using ProjectIGI.Core.Numerics;
 using ProjectIGI.Engine.Tasks;
 using ProjectIGI.Game.Igi2.Ai;
+using ProjectIGI.Game.Igi2.Player;
 using ProjectIGI.Game.Igi2.Vehicles;
 using ProjectIGI.Game.Igi2.World;
 
@@ -240,8 +241,8 @@ public static class Igi2CutsceneCameras
 
     /// <summary>
     /// Where a task stands for a cutscene camera, as it answers <c>GetCameraTargetInfo</c>: a task that is a camera target
-    /// itself; else a soldier by its body's live position, a car or a train by its live position, else any task that declares
-    /// a <c>Position</c> parameter, at the position level data gave it.
+    /// itself; else a soldier by its body's live position, the player by its body's live position, a car or a train by
+    /// its live position, else any task that declares a <c>Position</c> parameter, at the position level data gave it.
     /// </summary>
     /// <remarks>
     /// The cutscene's own look asked only the first of these, <c>Tree.FromId(id) is IIgi2CameraTarget</c>, which only a
@@ -258,6 +259,9 @@ public static class Igi2CutsceneCameras
         Igi2HumanSoldierTask soldier => new LiveTarget(
             () => soldier.Body?.Position ?? soldier.Position,
             () => Rows(soldier.Body?.Orientation ?? Matrix3f.Identity)),
+        Igi2HumanPlayerTask player when player.Human is { } human => new LiveTarget(
+            () => human.Position,
+            () => Rows(human.Orientation)),
         Igi2CarTask car => new LiveTarget(() => car.CurrentPosition, () => car.CurrentOrientation),
         Igi2TrainTask train => new LiveTarget(() => train.CurrentPosition, () => train.CurrentOrientation),
         GameTask named when named.TryGetScriptValue("Position", out object? value) && value is Vector3d position
