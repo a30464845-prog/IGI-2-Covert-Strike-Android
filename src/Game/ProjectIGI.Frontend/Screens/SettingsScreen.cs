@@ -28,11 +28,18 @@ namespace ProjectIGI.Frontend.Screens;
 ///
 /// Navigation: one screen instance holds the section in a field and rebuilds its tree on section
 /// change (Screen.Invalidate), so the entry-time snapshots are taken once and shared by
-/// every sub-screen. Back — the top-left BACK button, the Cancel button, or the Android Back key — is
+/// every sub-screen. Back — the BACK button, the Cancel button, or the Android Back key — is
 /// Cancel everywhere in Configuration: it restores those snapshots and closes, never leaving dirty
 /// values behind. OK saves; on a sub-screen it saves and returns to the section list, on the list it
 /// saves and closes. SECTIONS (sub-screens only) returns to the list without saving or discarding, so
 /// live edits stay live until OK or Cancel settles them.
+///
+/// Design: the options concept — a black background, a thin white frame with the title centred on the
+/// top edge breaking the line, the sections as tabs just inside the top, rows with the label on the
+/// left and the value on the right between chevrons, and BACK at the bottom-left inside the frame.
+/// Only the look changed: every section, row, option and value is the port's own, exactly as it was —
+/// no option from the concept was copied in. The concept's hand silhouettes are not drawn: the UI
+/// system has no hand asset and this screen draws its own chrome from primitives.
 /// </summary>
 public sealed class SettingsScreen : ShellScreen
 {
@@ -52,7 +59,6 @@ public sealed class SettingsScreen : ShellScreen
     // SECTIONS — is this tall, so no target is under the Android 48 dp floor.
     private const float RowHeightUnits = 104f;
     private const float RowWidthUnits = 1150f;
-    private const float SectionRowTextSize = 30f;
 
     /// <summary>Which view of Configuration this screen is showing.</summary>
     private enum Section
@@ -150,12 +156,17 @@ public sealed class SettingsScreen : ShellScreen
         _initialCrosshairOutline = HudCVars.CrosshairOutline.Value;
     }
 
-    /// <summary>Builds this screen's own theme: the shell's colours, with larger text and rows.</summary>
+    /// <summary>
+    /// Builds this screen's own theme: the concept's monochrome palette — near-black panel, white for
+    /// lit and selected text, neutral greys for the rest — with larger text and rows. The shared theme
+    /// is never mutated. White replaces the shell's blue accent, so slider fills and toggle knobs read
+    /// white instead of blue; the amber/blue of the old look is gone from this screen entirely.
+    /// </summary>
     private static UiTheme LargeTheme(UiTheme shared)
     {
         return new UiTheme(shared.Body, shared.Heading, shared.Mono, shared.Display)
         {
-            BodyTextSize = 22f,
+            BodyTextSize = 24f,
             HeadingTextSize = 52f,
             LabelTextSize = 23f,
             CaptionTextSize = 14f,
@@ -164,24 +175,24 @@ public sealed class SettingsScreen : ShellScreen
             RowHeight = 56f,
             RowDividers = shared.RowDividers,
             GlassBlur = shared.GlassBlur,
-            Text = shared.Text,
-            TextBright = shared.TextBright,
-            TextLabel = shared.TextLabel,
-            TextSecondary = shared.TextSecondary,
-            TextMuted = shared.TextMuted,
-            TextDim = shared.TextDim,
-            TextDisabled = shared.TextDisabled,
-            Accent = shared.Accent,
-            AccentHover = shared.AccentHover,
-            OnAccent = shared.OnAccent,
-            Panel = shared.Panel,
-            FocusFill = shared.FocusFill,
-            Border = shared.Border,
-            Track = shared.Track,
+            Text = Bgra32.FromRgb(205, 205, 205),
+            TextBright = Bgra32.White,
+            TextLabel = Bgra32.FromRgb(168, 168, 168),
+            TextSecondary = Bgra32.FromRgb(150, 150, 150),
+            TextMuted = Bgra32.FromRgb(118, 118, 118),
+            TextDim = Bgra32.FromRgb(96, 96, 96),
+            TextDisabled = Bgra32.FromRgb(80, 80, 80),
+            Accent = Bgra32.White,
+            AccentHover = Bgra32.White,
+            OnAccent = Bgra32.FromRgb(0, 0, 0),
+            Panel = Bgra32.FromRgb(0, 0, 0),
+            FocusFill = Bgra32.FromRgba(255, 255, 255, 16),
+            Border = Bgra32.White,
+            Track = Bgra32.FromRgb(96, 96, 96),
             Shadow = shared.Shadow,
-            Surface = shared.Surface,
-            SurfaceRaised = shared.SurfaceRaised,
-            Selection = shared.Selection,
+            Surface = Bgra32.FromRgb(16, 16, 16),
+            SurfaceRaised = Bgra32.FromRgb(24, 24, 24),
+            Selection = Bgra32.FromRgba(255, 255, 255, 26),
             Info = shared.Info,
             Success = shared.Success,
             Warning = shared.Warning,
@@ -189,6 +200,25 @@ public sealed class SettingsScreen : ShellScreen
             Destructive = shared.Destructive,
             DestructiveBorder = shared.DestructiveBorder,
         };
+    }
+
+    // A chevron's hit box, in design units: the same 30-unit box the old cycler's arrows used, plus
+    // room around the thin stroke so a thumb lands on it.
+    private const float ChevronBoxUnits = 34f;
+
+    /// <summary>One thin stroked chevron, the concept's ‹ / ›, in the given ink.</summary>
+    /// <param name="painter">The painter.</param>
+    /// <param name="box">The chevron's box.</param>
+    /// <param name="sign">-1 for a left chevron, +1 for a right one.</param>
+    /// <param name="ink">The chevron's colour.</param>
+    private static void DrawConceptChevron(UiPainter painter, UiRect box, float sign, Bgra32 ink)
+    {
+        float reach = painter.Context.Px(9f);
+        float thick = painter.Context.Px(2f);
+        UiVec2 c = box.Center;
+        var tip = new UiVec2(c.X + (sign * reach * 0.5f), c.Y);
+        painter.StrokeLine(new UiVec2(tip.X - (sign * reach), c.Y - reach), tip, thick, ink);
+        painter.StrokeLine(new UiVec2(tip.X - (sign * reach), c.Y + reach), tip, thick, ink);
     }
 
     /// <inheritdoc/>
@@ -208,9 +238,10 @@ public sealed class SettingsScreen : ShellScreen
         _isDragging = false;
         _pendingTapTarget = null;
 
-        // This screen's own theme: the shell's colours, with larger text and rows. The shared theme
-        // is never mutated -- the other screens are laid out for its sizes. The frame is already as
-        // tall as the 1080 reference allows, so the growth is in width, row height and text.
+        // This screen's own theme: the concept's monochrome palette, with larger text and rows.
+        // The shared theme is never mutated -- the other screens are laid out for its sizes.
+        // The frame is already as tall as the 1080 reference allows, so the growth is in width,
+        // row height and text.
         UiTheme theme = LargeTheme(Context.Theme);
 
         Section section = _section;
@@ -222,17 +253,19 @@ public sealed class SettingsScreen : ShellScreen
 
         var root = new Canvas();
 
-        // 1. Logo at Top Center
-        var logo = new IgiLogo(theme)
+        // 1. Black backdrop: the concept is black edge to edge, so the level never shows around
+        // the frame the way the old shell let it. It lets the pointer through to the frame.
+        var backdrop = new Panel
         {
-            Margin = new Thickness(0f, 20f, 0f, 0f),
-            VerticalAlignment = VerticalAlignment.Top,
-            HorizontalAlignment = HorizontalAlignment.Center,
+            Background = Bgra32.FromRgb(0, 0, 0),
+            IsHitTestTransparent = true,
         };
-        root.Add(logo, new Anchor(UiVec2.Zero, new UiVec2(1f, 0.20f), Thickness.Zero));
+        root.Add(backdrop, new Anchor(UiVec2.Zero, UiVec2.One, Thickness.Zero));
 
-        // 2. Central frame. Opaque dark (alpha 255), one blue hairline: the frame's own background
-        // used to be translucent (alpha 240), letting the level show through the panel.
+        // 2. Central frame: the concept's thin white border on black, its title centred on the
+        // top edge breaking the line, and the port's own sections as tabs just inside the top.
+        // The old frame was a blue hairline on dark blue with a header band and the logo above it;
+        // both are gone, and the frame keeps its size so every row stays where it was.
         string title = section switch
         {
             Section.SaveGame => "Configuration - Save game",
@@ -243,23 +276,25 @@ public sealed class SettingsScreen : ShellScreen
             Section.Display => "Configuration - Display & readability",
             _ => "Configuration",
         };
-        var frame = new IgiTacticalFrame(theme, title)
+        var frame = new ConceptFrame(theme, title)
         {
             Width = 1280f,
             Height = 880f,
             Margin = new Thickness(0f, 15f, 0f, 0f),
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center,
-            BackgroundColor = Bgra32.FromRgb(8, 16, 30),
         };
 
+        frame.AddChild(BuildTabStrip(theme, section));
+
         // The options scroll: a section can hold more rows than the frame shows, so the list lives
-        // in a ScrollView and the button bar stays fixed at the bottom of the frame.
+        // in a ScrollView and the button bar stays fixed at the bottom of the frame. Its top sits
+        // below the tab strip; its bottom edge is where it always was.
         _scroll = new ScrollView(theme)
         {
             Width = 1190f,
-            Height = 740f,
-            Margin = new Thickness(60f, 42f, 30f, 0f),
+            Height = 678f,
+            Margin = new Thickness(60f, 104f, 30f, 0f),
             ScrollbarWidth = 14f,
             ScrollbarHitWidth = 56f,
         };
@@ -301,26 +336,53 @@ public sealed class SettingsScreen : ShellScreen
         frame.AddChild(BuildButtonBar(theme, section != Section.List));
         root.Add(frame, new Anchor(UiVec2.Zero, UiVec2.One, Thickness.Zero));
 
-        // 3. BACK, top-left of the screen, on every view: the visible back control. It is Cancel —
-        // it restores the entry-time snapshots and closes — exactly like the Cancel button and the
-        // Android Back key. It sits outside the frame, clear of the centred logo and the frame edge.
-        var backBtn = new Button(theme, "BACK")
-        {
-            Accent = ButtonAccent.Ghost,
-            Width = 220f,
-            Height = RowHeightUnits,
-            TextSize = SectionRowTextSize,
-            HorizontalAlignment = HorizontalAlignment.Left,
-            VerticalAlignment = VerticalAlignment.Top,
-        };
-        backBtn.Activated += _ =>
-        {
-            RestoreSnapshots();
-            CloseConfig();
-        };
-        root.Add(backBtn, new Anchor(UiVec2.Zero, UiVec2.Zero, new Thickness(32f, 32f, 0f, 0f)));
-
+        // BACK lives in the button bar now, at the bottom-left inside the frame, as the concept
+        // shows it — it is still Cancel, exactly like the Cancel button and the Android Back key.
         return root;
+    }
+
+    /// <summary>
+    /// The section tabs, just inside the top of the frame: the port's own sections, in the same
+    /// order as the section list, the current one lit white and the rest grey. A tab goes straight
+    /// to its section — the same destination as its row in the list. On the list no tab is lit.
+    /// </summary>
+    private FlexPanel BuildTabStrip(UiTheme theme, Section section)
+    {
+        var strip = new FlexPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Gap = 8f,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Top,
+            Margin = new Thickness(0f, 30f, 0f, 0f),
+            Height = 56f,
+        };
+
+        if (Context.InGame && Context.Host.MissionSaves is not null)
+        {
+            AddTab(strip, theme, "Save game", Section.SaveGame, section);
+        }
+
+        AddTab(strip, theme, "Graphics", Section.Graphics, section);
+        AddTab(strip, theme, "Graphics quality", Section.GraphicsQuality, section);
+        AddTab(strip, theme, "Controls", Section.Controls, section);
+        AddTab(strip, theme, "Crosshair", Section.Crosshair, section);
+        AddTab(strip, theme, "Display & readability", Section.Display, section);
+        return strip;
+    }
+
+    /// <summary>One tab: a header tab with its underline off, so the concept's plain text tabs — grey, white when current — are what shows.</summary>
+    private void AddTab(FlexPanel strip, UiTheme theme, string caption, Section target, Section current)
+    {
+        var tab = new HeaderTab(theme, caption)
+        {
+            ShowsUnderline = false,
+            Selected = target == current,
+            TextSize = 18f,
+            Padding = new Thickness(14f, 0f),
+        };
+        tab.Activated += _ => GoToSection(target);
+        strip.Add(tab);
     }
 
     /// <summary>The section list: one 48 dp row per section, with the save/cancel rule stated on screen.</summary>
@@ -350,14 +412,13 @@ public sealed class SettingsScreen : ShellScreen
         AddSectionRow(stack, theme, "Display & readability", Section.Display);
     }
 
-    /// <summary>One section row: its name, with a chevron that says it opens a sub-screen.</summary>
+    /// <summary>One section row: its name on the left, a chevron on the right that says it opens a sub-screen.</summary>
     private void AddSectionRow(StackPanel stack, UiTheme theme, string title, Section section)
     {
-        var row = new Button(theme, title + " >")
+        var row = new ConceptNavRow(theme, title)
         {
             Width = RowWidthUnits,
             Height = RowHeightUnits,
-            TextSize = SectionRowTextSize,
         };
         row.Activated += _ => GoToSection(section);
         stack.AddChild(row);
@@ -381,7 +442,7 @@ public sealed class SettingsScreen : ShellScreen
             return;
         }
 
-        var saveSlotButtons = new List<Button>();
+        var saveSlotButtons = new List<ConceptNavRow>();
         var savesLeftLabel = new Label(theme.Body, string.Empty, 20f, theme.TextSecondary);
         var saveMessageLabel = new Label(theme.Body, string.Empty, 20f, theme.Accent);
         int confirmedSaveSlot = -1;
@@ -403,7 +464,7 @@ public sealed class SettingsScreen : ShellScreen
         foreach (TitleSaveSlot slot in saves.Slots)
         {
             int number = slot.Slot;
-            var saveButton = new Button(theme, SaveSlotCaption(slot))
+            var saveButton = new ConceptNavRow(theme, SaveSlotCaption(slot))
             {
                 Width = RowWidthUnits,
                 Height = RowHeightUnits,
@@ -485,11 +546,10 @@ public sealed class SettingsScreen : ShellScreen
             selectedFpsIndex = nearest;
         }
 
-        var fpsCycler = new OptionCycler(theme, "Max Frame Rate", FpsCapLabels, selectedFpsIndex)
+        var fpsCycler = new ConceptCyclerRow(theme, "Max Frame Rate", FpsCapLabels, selectedFpsIndex)
         {
             Width = RowWidthUnits,
             Height = RowHeightUnits,
-            ContentWidth = 320f,
         };
         fpsCycler.SelectionChanged += index =>
         {
@@ -500,11 +560,10 @@ public sealed class SettingsScreen : ShellScreen
 
         // ── Render Resolution Quality ──────────────────────────────────────
         int currentRes = Context.Host.RenderScaleMode;
-        var resCycler = new OptionCycler(theme, "Resolution Quality", RenderScaleLabels, Math.Clamp(currentRes, 0, 3))
+        var resCycler = new ConceptCyclerRow(theme, "Resolution Quality", RenderScaleLabels, Math.Clamp(currentRes, 0, 3))
         {
             Width = RowWidthUnits,
             Height = RowHeightUnits,
-            ContentWidth = 320f,
         };
         resCycler.SelectionChanged += index =>
         {
@@ -528,11 +587,10 @@ public sealed class SettingsScreen : ShellScreen
             }
         }
 
-        var viewDistanceCycler = new OptionCycler(theme, "View Distance", ViewDistanceLabels, selectedViewDistanceIndex)
+        var viewDistanceCycler = new ConceptCyclerRow(theme, "View Distance", ViewDistanceLabels, selectedViewDistanceIndex)
         {
             Width = RowWidthUnits,
             Height = RowHeightUnits,
-            ContentWidth = 320f,
             Tooltip = "How far the world draws. Near (2.5 km) skips what the original's fog hides anyway; 50% is 50 km; Far is the original's 100 km.",
         };
         viewDistanceCycler.SelectionChanged += index =>
@@ -605,11 +663,10 @@ public sealed class SettingsScreen : ShellScreen
             selectedAnisotropyIndex = 0;
         }
 
-        var anisotropyCycler = new OptionCycler(theme, "Texture Sharpness", AnisotropyLabels, selectedAnisotropyIndex)
+        var anisotropyCycler = new ConceptCyclerRow(theme, "Texture Sharpness", AnisotropyLabels, selectedAnisotropyIndex)
         {
             Width = RowWidthUnits,
             Height = RowHeightUnits,
-            ContentWidth = 320f,
             Tooltip = "How sharp the ground stays into the distance. Off is the original's look; higher keeps snow and terrain crisp towards the horizon. Applies immediately.",
         };
         anisotropyCycler.SelectionChanged += index =>
@@ -637,11 +694,10 @@ public sealed class SettingsScreen : ShellScreen
         // level sharper, Low one softer. It reaches textures already loaded, so it shows at once.
         // Vulkan only -- WebGPU has no mip-bias sampler state and samples unbiased.
         int currentTextureQuality = Math.Clamp(MaterialCVars.TextureQuality.Value, 0, 2);
-        var textureQualityCycler = new OptionCycler(theme, "Texture Quality", TextureQualityLabels, currentTextureQuality)
+        var textureQualityCycler = new ConceptCyclerRow(theme, "Texture Quality", TextureQualityLabels, currentTextureQuality)
         {
             Width = RowWidthUnits,
             Height = RowHeightUnits,
-            ContentWidth = 320f,
             Tooltip = "How sharp textures stay at a distance. High samples the sharper mip levels; Low softens them. Applies immediately, on Vulkan.",
         };
         textureQualityCycler.SelectionChanged += index =>
@@ -707,12 +763,10 @@ public sealed class SettingsScreen : ShellScreen
     private void BuildControlsSection(StackPanel stack, UiTheme theme)
     {
         // ── On-Screen Touch Controls Customizer ───────────────────────────
-        var customizeBtn = new Button(theme, "CUSTOMIZE ON-SCREEN CONTROLS")
+        var customizeBtn = new ConceptNavRow(theme, "CUSTOMIZE ON-SCREEN CONTROLS")
         {
-            Accent = ButtonAccent.Ghost,
             Width = RowWidthUnits,
             Height = RowHeightUnits,
-            TextSize = 36f,
         };
         customizeBtn.Activated += _ => Context.Host.CustomizeTouchControls();
         stack.AddChild(customizeBtn);
@@ -835,18 +889,19 @@ public sealed class SettingsScreen : ShellScreen
         };
         stack.AddChild(crosshairSlider);
 
-        var crosshairColourBtn = new Button(theme, "Crosshair colour: " + CrosshairPalette.Names[HudCVars.CrosshairColor.Value])
+        // Was a button whose caption carried the colour ("Crosshair colour: GREEN"); now a chevron
+        // row like every other choice — the label on the left, the colour on the right between the
+        // chevrons. A tap on the right steps forward, on the left steps back, wrapping either way.
+        var crosshairColourCycler = new ConceptCyclerRow(theme, "Crosshair colour", CrosshairPalette.Names, Math.Clamp(HudCVars.CrosshairColor.Value, 0, CrosshairPalette.Names.Length - 1))
         {
             Width = RowWidthUnits,
             Height = RowHeightUnits,
         };
-        crosshairColourBtn.Activated += _ =>
+        crosshairColourCycler.SelectionChanged += index =>
         {
-            int next = (HudCVars.CrosshairColor.Value + 1) % CrosshairPalette.Names.Length;
-            HudCVars.CrosshairColor.Value = next;
-            crosshairColourBtn.Text = "Crosshair colour: " + CrosshairPalette.Names[next];
+            HudCVars.CrosshairColor.Value = index;
         };
-        stack.AddChild(crosshairColourBtn);
+        stack.AddChild(crosshairColourCycler);
 
         bool crosshairOutlineState = HudCVars.CrosshairOutline.Value;
         var crosshairOutlineToggle = new Toggle(theme, "Crosshair outline", crosshairOutlineState)
@@ -914,8 +969,10 @@ public sealed class SettingsScreen : ShellScreen
     }
 
     /// <summary>
-    /// The bottom bar: OK and Cancel at the bottom-right on every view. Sub-screens also get
-    /// SECTIONS at the bottom-left, which returns to the section list without saving or discarding.
+    /// The bottom bar, inside the frame: BACK at the bottom-left — the concept's back action, still
+    /// Cancel — SECTIONS beside it on sub-screens, OK and Cancel at the bottom-right. All four are
+    /// plain text in the concept's grey-to-white, no boxes and no blue: the old blue menu buttons
+    /// and the ghost outline are gone.
     /// </summary>
     private FlexPanel BuildButtonBar(UiTheme theme, bool showSections)
     {
@@ -928,11 +985,25 @@ public sealed class SettingsScreen : ShellScreen
             Margin = new Thickness(32f, 0f, 32f, 16f),
         };
 
+        var backBtn = new Button(theme, "BACK")
+        {
+            Accent = ButtonAccent.Text,
+            Width = 200f,
+            Height = RowHeightUnits,
+            TextSize = 28f,
+        };
+        backBtn.Activated += _ =>
+        {
+            RestoreSnapshots();
+            CloseConfig();
+        };
+        btnBar.Add(backBtn);
+
         if (showSections)
         {
             var sectionsBtn = new Button(theme, "SECTIONS")
             {
-                Accent = ButtonAccent.Ghost,
+                Accent = ButtonAccent.Text,
                 Width = 240f,
                 Height = RowHeightUnits,
                 TextSize = 28f,
@@ -944,15 +1015,14 @@ public sealed class SettingsScreen : ShellScreen
         // Pushes OK/Cancel to the right edge.
         btnBar.Add(new Panel(), grow: 1f);
 
-        var okBtn = new IgiMenuButton(theme, "OK")
+        var okBtn = new Button(theme, "OK")
         {
+            Accent = ButtonAccent.Text,
             TextSize = 36f,
             Height = RowHeightUnits,
             Width = 220f,
-            NormalColor = Bgra32.FromRgb(80, 160, 255),
-            HoverColor = Bgra32.FromRgb(228, 238, 252),
         };
-        okBtn.Activated += () =>
+        okBtn.Activated += _ =>
         {
             SaveAll();
             if (_section == Section.List)
@@ -966,15 +1036,14 @@ public sealed class SettingsScreen : ShellScreen
         };
         btnBar.Add(okBtn);
 
-        var cancelBtn = new IgiMenuButton(theme, "Cancel")
+        var cancelBtn = new Button(theme, "Cancel")
         {
+            Accent = ButtonAccent.Text,
             TextSize = 36f,
             Height = RowHeightUnits,
             Width = 220f,
-            NormalColor = Bgra32.FromRgb(80, 160, 255),
-            HoverColor = Bgra32.FromRgb(228, 238, 252),
         };
-        cancelBtn.Activated += () =>
+        cancelBtn.Activated += _ =>
         {
             RestoreSnapshots();
             CloseConfig();
@@ -1133,4 +1202,284 @@ public sealed class SettingsScreen : ShellScreen
 
         return base.HandleInput(nav, input);
     }
+
+    /// <summary>
+    /// The concept's frame, drawn locally to this screen: an opaque black panel with a thin white
+    /// border, its title centred on the top edge breaking the line. The shared frame widgets stay
+    /// untouched — the pause-menu restyle owns those in parallel.
+    /// </summary>
+    private sealed class ConceptFrame : Panel
+    {
+        private readonly UiTheme _theme;
+
+        /// <summary>Initializes a new instance of the <see cref="ConceptFrame"/> class.</summary>
+        /// <param name="theme">The theme to draw from.</param>
+        /// <param name="title">The title, drawn uppercased on the top edge.</param>
+        public ConceptFrame(UiTheme theme, string title)
+        {
+            ArgumentNullException.ThrowIfNull(theme);
+            _theme = theme;
+            Title = title ?? string.Empty;
+            HorizontalAlignment = HorizontalAlignment.Center;
+            VerticalAlignment = VerticalAlignment.Center;
+        }
+
+        /// <summary>Gets or sets the frame title.</summary>
+        public string Title { get; set; }
+
+        /// <summary>Gets or sets the background fill.</summary>
+        public Bgra32 BackgroundColor { get; set; } = Bgra32.FromRgb(0, 0, 0);
+
+        /// <summary>Gets or sets the border line colour.</summary>
+        public Bgra32 BorderColor { get; set; } = Bgra32.White;
+
+        /// <summary>Gets or sets the title's size, in design units.</summary>
+        public float TitleSize { get; set; } = 32f;
+
+        /// <summary>Gets or sets the title's letterspacing, in ems.</summary>
+        public float TitleTracking { get; set; } = 0.1f;
+
+        /// <inheritdoc/>
+        protected override UiVec2 MeasureContent(LayoutContext context, UiVec2 available)
+        {
+            UiVec2 childSize = base.MeasureContent(context, available);
+            float w = !float.IsNaN(Width) ? context.Px(Width) : childSize.X;
+            float h = !float.IsNaN(Height) ? context.Px(Height) : childSize.Y;
+            return new UiVec2(w, h);
+        }
+
+        /// <inheritdoc/>
+        protected override void OnDraw(UiPainter painter)
+        {
+            UiRect b = Bounds;
+            if (b.IsEmpty)
+            {
+                return;
+            }
+
+            painter.FillRect(b, BackgroundColor);
+            painter.StrokeRect(b, painter.Context.Px(2f), BorderColor);
+
+            if (!string.IsNullOrEmpty(Title))
+            {
+                float sizePx = painter.Context.Px(TitleSize);
+                string upper = Title.ToUpperInvariant();
+                float textW = UiPainter.MeasureLabel(_theme.Heading, upper, sizePx, TitleTracking);
+                float gapW = textW + painter.Context.Px(56f);
+
+                // The title breaks the top border: paint the background over the line where it sits.
+                painter.FillRect(
+                    new UiRect(b.Center.X - (gapW * 0.5f), b.Y - (sizePx * 0.5f), gapW, sizePx),
+                    BackgroundColor);
+
+                var box = new UiRect(b.Center.X - (textW * 0.5f), b.Y - (sizePx * 0.5f), textW, sizePx);
+                painter.DrawLabel(
+                    _theme.Heading,
+                    upper,
+                    new UiVec2(box.X, UiRowStyle.CapsCenterY(_theme.Heading, sizePx, box)),
+                    sizePx,
+                    Bgra32.White,
+                    TitleTracking);
+            }
+
+            base.OnDraw(painter);
+        }
+    }
+
+    /// <summary>
+    /// A choice row in the concept's shape: the label on the left, the value on the right between a
+    /// left and a right chevron. It steps the same way the old cycler cell did — left steps back,
+    /// right steps forward, wrapping at either end, and a tap anywhere steps (left chevron back,
+    /// anywhere else forward) — only the drawing changed: no caption stacked over the value, no pips.
+    /// The label and the value keep the port's own strings, exactly as given.
+    /// </summary>
+    private sealed class ConceptCyclerRow : Control
+    {
+        private readonly List<string> _options;
+        private int _selected;
+        private UiRect _leftChevron;
+        private UiRect _valueBox;
+        private UiRect _rightChevron;
+        private UiVec2 _pointer;
+
+        /// <summary>Initializes a new instance of the <see cref="ConceptCyclerRow"/> class.</summary>
+        /// <param name="theme">The theme to draw from.</param>
+        /// <param name="label">The caption, shown as given.</param>
+        /// <param name="options">The values, in order.</param>
+        /// <param name="selected">The initial value's index.</param>
+        public ConceptCyclerRow(UiTheme theme, string label, IEnumerable<string> options, int selected = 0)
+            : base(theme)
+        {
+            ArgumentNullException.ThrowIfNull(options);
+            Label = label ?? string.Empty;
+            _options = [.. options];
+            _selected = _options.Count == 0 ? 0 : Math.Clamp(selected, 0, _options.Count - 1);
+        }
+
+        /// <summary>Raised when the value changes, with its new index.</summary>
+        public event Action<int>? SelectionChanged;
+
+        /// <summary>Gets the caption.</summary>
+        public string Label { get; }
+
+        /// <summary>Gets the values.</summary>
+        public IReadOnlyList<string> Options => _options;
+
+        /// <summary>Gets or sets the selected value's index.</summary>
+        public int SelectedIndex
+        {
+            get => _selected;
+            set
+            {
+                if (_options.Count == 0)
+                {
+                    return;
+                }
+
+                int clamped = Math.Clamp(value, 0, _options.Count - 1);
+                if (clamped == _selected)
+                {
+                    return;
+                }
+
+                _selected = clamped;
+                SelectionChanged?.Invoke(_selected);
+            }
+        }
+
+        /// <summary>Steps the value, wrapping at either end.</summary>
+        /// <param name="delta">+1 for the next value, -1 for the previous.</param>
+        public void Step(int delta)
+        {
+            if (_options.Count == 0 || delta == 0)
+            {
+                return;
+            }
+
+            SelectedIndex = ((_selected + Math.Sign(delta)) % _options.Count + _options.Count) % _options.Count;
+        }
+
+        /// <inheritdoc/>
+        public override bool HandleNavigate(NavDirection direction)
+        {
+            switch (direction)
+            {
+                case NavDirection.Left:
+                    Step(-1);
+                    return true;
+                case NavDirection.Right:
+                    Step(1);
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        /// <inheritdoc/>
+        public override void ActivateAt(UiVec2 point)
+        {
+            Step(_leftChevron.Contains(point) ? -1 : 1);
+            RaiseActivated();
+        }
+
+        /// <inheritdoc/>
+        public override void PointerMoved(UiVec2 point) => _pointer = point;
+
+        /// <inheritdoc/>
+        protected override void OnActivate() => Step(1);
+
+        /// <inheritdoc/>
+        protected override UiVec2 MeasureContent(LayoutContext context, UiVec2 available) =>
+            UiRowStyle.Measure(this, context, available);
+
+        /// <inheritdoc/>
+        protected override void ArrangeContent(LayoutContext context, UiRect contentRect)
+        {
+            float box = context.Px(ChevronBoxUnits);
+            float gap = context.Px(14f);
+            float inset = context.Px(UiRowStyle.Inset);
+            float valueSize = context.Px(26f) * LayoutContext.GlobalTextScale;
+
+            // Wide enough for the longest value, so the chevrons never shift as the value changes.
+            float valueW = context.Px(60f);
+            foreach (string option in _options)
+            {
+                valueW = MathF.Max(valueW, UiPainter.MeasureLabel(Theme.Heading, option, valueSize, 0.08f));
+            }
+
+            float right = contentRect.Right - inset;
+            float y = contentRect.Center.Y - (box * 0.5f);
+            _rightChevron = new UiRect(right - box, y, box, box);
+            _valueBox = new UiRect(_rightChevron.X - gap - valueW, contentRect.Y, valueW, contentRect.Height);
+            _leftChevron = new UiRect(_valueBox.X - gap - box, y, box, box);
+        }
+
+        /// <inheritdoc/>
+        protected override void OnDraw(UiPainter painter)
+        {
+            LayoutContext context = painter.Context;
+            float appear = Visual.Appear;
+            float highlight = UiRowStyle.Highlight(this);
+
+            // The caption, cut short before the value block; grey at rest, white under focus/pointer.
+            UiRowStyle.DrawFrame(painter, this, Label, highlight, _leftChevron.X);
+
+            if (_options.Count > 0)
+            {
+                float valueSize = context.Px(26f) * LayoutContext.GlobalTextScale;
+                string value = _options[_selected];
+                float width = UiPainter.MeasureLabel(Theme.Heading, value, valueSize, 0.08f);
+                var at = new UiVec2(
+                    _valueBox.Center.X - (width * 0.5f),
+                    UiRowStyle.CapsCenterY(Theme.Heading, valueSize, _valueBox));
+                painter.DrawLabel(Theme.Heading, value, at, valueSize, UiPalette.Fade(Theme.TextSecondary, appear), 0.08f);
+            }
+
+            DrawConceptChevron(painter, _leftChevron, -1f, UiPalette.Fade(IsPointerOver && _leftChevron.Contains(_pointer) ? Theme.TextBright : Theme.TextDim, appear));
+            DrawConceptChevron(painter, _rightChevron, 1f, UiPalette.Fade(IsPointerOver && _rightChevron.Contains(_pointer) ? Theme.TextBright : Theme.TextDim, appear));
+        }
+    }
+
+    /// <summary>
+    /// A navigation row in the concept's shape: the caption on the left, one chevron on the right.
+    /// A tap anywhere on the row activates it — the same full-row hit area the old button rows had.
+    /// </summary>
+    private sealed class ConceptNavRow : Control
+    {
+        private UiRect _chevronBox;
+
+        /// <summary>Initializes a new instance of the <see cref="ConceptNavRow"/> class.</summary>
+        /// <param name="theme">The theme to draw from.</param>
+        /// <param name="text">The caption, shown as given.</param>
+        public ConceptNavRow(UiTheme theme, string text)
+            : base(theme)
+        {
+            Text = text ?? string.Empty;
+        }
+
+        /// <summary>Gets or sets the caption.</summary>
+        public string Text { get; set; }
+
+        /// <inheritdoc/>
+        protected override UiVec2 MeasureContent(LayoutContext context, UiVec2 available) =>
+            UiRowStyle.Measure(this, context, available);
+
+        /// <inheritdoc/>
+        protected override void ArrangeContent(LayoutContext context, UiRect contentRect)
+        {
+            float box = context.Px(ChevronBoxUnits);
+            float inset = context.Px(UiRowStyle.Inset);
+            _chevronBox = new UiRect(contentRect.Right - inset - box, contentRect.Center.Y - (box * 0.5f), box, box);
+        }
+
+        /// <inheritdoc/>
+        protected override void OnDraw(UiPainter painter)
+        {
+            float appear = Visual.Appear;
+            float highlight = UiRowStyle.Highlight(this);
+            UiRowStyle.DrawFrame(painter, this, Text, highlight, _chevronBox.X);
+            DrawConceptChevron(painter, _chevronBox, 1f, UiPalette.Fade(IsPointerOver ? Theme.TextBright : Theme.TextDim, appear));
+        }
+    }
+
 }
