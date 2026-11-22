@@ -76,4 +76,34 @@ public static class PlayerCheatCVars
     public static readonly BoolCVar NoReload = CVar.Bool(
         "g_cheat_no_reload", false, CheatFlags,
         "Refill the magazine from the reserve without reloading (cheat).");
+
+    /// <summary>Steers the view onto the nearest visible enemy in front of the player.</summary>
+    public static readonly BoolCVar Aimbot = CVar.Bool(
+        "g_cheat_aimbot", false, CheatFlags,
+        "Steer the view onto a visible enemy (cheat).");
+
+    /// <summary>How fast the aimbot steers the view, as a share of its full rate.</summary>
+    public static readonly NumericCVar<float> AimbotStrength = CVar.Float(
+        "g_cheat_aimbot_strength", 0.5f, 0f, 1f, CheatFlags,
+        "Aimbot steering strength (cheat). 0 is off, 1 is the full rate.");
+
+    /// <summary>How far away the aimbot looks for a target, in metres.</summary>
+    public static readonly NumericCVar<float> AimbotMaxDistance = CVar.Float(
+        "g_cheat_aimbot_max_distance", 60f, 10f, 100f, CheatFlags,
+        "Aimbot maximum target distance in metres (cheat).");
+
+    /// <summary>How wide the aimbot's lock cone is, in degrees from the crosshair.</summary>
+    public static readonly NumericCVar<float> AimbotCone = CVar.Float(
+        "g_cheat_aimbot_cone", 27f, 5f, 60f, CheatFlags,
+        "Aimbot lock cone in degrees from the crosshair (cheat).");
+
+    /// <summary>Where on the target the aimbot aims.</summary>
+    public static readonly EnumCVar<AimbotAimPartKind> AimbotAimPart = CVar.Choice(
+        "g_cheat_aimbot_aim_part", AimbotAimPartKind.Chest, CheatFlags,
+        "Aimbot aim point (cheat): chest or head.");
+
+    /// <summary>Which visible enemy the aimbot picks.</summary>
+    public static readonly EnumCVar<AimbotTargetKind> AimbotTarget = CVar.Choice(
+        "g_cheat_aimbot_target", AimbotTargetKind.ClosestToCrosshair, CheatFlags,
+        "Aimbot target pick (cheat): closest to the crosshair or nearest.");
 }
