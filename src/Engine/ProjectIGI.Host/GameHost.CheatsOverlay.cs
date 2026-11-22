@@ -25,7 +25,6 @@ public sealed partial class GameHost
         Cheats,
         Benchmark,
         Settings,
-        Console,
     }
 
     private readonly record struct MenuStripRow(MenuStripAction Action, UiRect Rect);
@@ -45,7 +44,6 @@ public sealed partial class GameHost
             MenuStripAction.Cheats,
             MenuStripAction.Benchmark,
             MenuStripAction.Settings,
-            MenuStripAction.Console,
         ];
         var rows = new MenuStripRow[actions.Length];
         for (int i = 0; i < actions.Length; i++)
@@ -63,7 +61,6 @@ public sealed partial class GameHost
         MenuStripAction.Cheats => "CHEATS",
         MenuStripAction.Benchmark => "BENCHMARK",
         MenuStripAction.Settings => "SETTINGS",
-        MenuStripAction.Console => "CONSOLE",
         _ => string.Empty,
     };
 
@@ -78,8 +75,8 @@ public sealed partial class GameHost
         }
 
         // While a benchmark is running the menu is hidden and the strip is not drawn; the modal
-        // cannot open under the drone view, and the console toggle stays put too. The
-        // first-run prompt is the same: its own buttons own the taps until it is answered.
+        // cannot open under the drone view. The first-run prompt is the same: its own buttons
+        // own the taps until it is answered.
         if (BenchmarkRunning || _benchmarkPromptUp)
         {
             _cheatsModalOpen = false;
@@ -164,15 +161,6 @@ public sealed partial class GameHost
                             _menuFlow.MenuMode = true;
                         }
 
-                        break;
-
-                    // Console: taps toggle the developer console (the same open state
-                    // the Grave key flips). The soft keyboard follows the console:
-                    // opening it summons the IME for typing commands, closing it
-                    // dismisses the keyboard again.
-                    case MenuStripAction.Console:
-                        state.Console.Model.IsOpen = !state.Console.Model.IsOpen;
-                        KeyboardRequested = state.Console.Model.IsOpen;
                         break;
                 }
 
@@ -311,21 +299,14 @@ public sealed partial class GameHost
         Bgra32 panel = Bgra32.FromRgb(8, 16, 30);
         Bgra32 textPrimary = Bgra32.FromRgb(235, 242, 250);
         Bgra32 textSecondary = Bgra32.FromRgb(150, 175, 190);
-        Bgra32 darkOnAccent = Bgra32.FromRgb(10, 20, 38);
 
         // ── 1. Main-menu strip: labelled 48 dp rows, top-right ──────────────
         // One row per entry, glyph + label, opaque dark with the accent hairline.
-        // The console row fills accent while its state is on.
         foreach (MenuStripRow row in MenuStripRows(width, scale))
         {
-            bool highlighted = row.Action switch
-            {
-                MenuStripAction.Console => state.Console.IsOpen,
-                _ => false,
-            };
-            Bgra32 fill = highlighted ? accent : panel;
-            Bgra32 glyphColor = highlighted ? darkOnAccent : accent;
-            Bgra32 labelColor = highlighted ? darkOnAccent : textPrimary;
+            Bgra32 fill = panel;
+            Bgra32 glyphColor = accent;
+            Bgra32 labelColor = textPrimary;
 
             painter.FillRect(row.Rect, fill);
             painter.StrokeRect(row.Rect, 1.5f * scale, accent);
@@ -361,20 +342,6 @@ public sealed partial class GameHost
                     {
                         painter.FillRect(new UiRect(trackX, trackY[i], trackW, trackH), glyphColor);
                         painter.FillRect(new UiRect(knobX[i], trackY[i] - (1.5f * gs), knob, knob), glyphColor);
-                    }
-
-                    break;
-
-                case MenuStripAction.Console:
-                    // Console prompt glyph ">_", centred in the glyph box.
-                    if (_shellType is { } consoleType)
-                    {
-                        const string prompt = ">_";
-                        float promptSize = 16f * gs;
-                        UiVec2 promptExtent = consoleType.Mono.Measure(prompt, promptSize);
-                        painter.DrawText(consoleType.Mono, prompt,
-                            new UiVec2(gx + ((28f * gs - promptExtent.X) * 0.5f), gy + ((28f * gs - promptExtent.Y) * 0.5f)),
-                            promptSize, glyphColor);
                     }
 
                     break;
