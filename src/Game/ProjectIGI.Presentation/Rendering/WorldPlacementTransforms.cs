@@ -130,9 +130,11 @@ internal sealed class WorldPlacementTransforms
             displayed = displayed with { Orientation = orientation };
         }
 
-        // A fan or a radar head, which turns for ever and never leaves its spot. Same reasoning as
+        // A fan or a radar head, which turns for ever; one riding a mover keeps turning with it
+        // (the mover branch below re-applies the spin it overwrites). Same reasoning as
         // the camera above: the model and the position are settled, only the transform is per-frame.
-        if (Spins?.TryGetOrientation(placement, FrameAlpha, out Matrix3f spun) == true)
+        bool spinning = Spins?.TryGetOrientation(placement, FrameAlpha, out Matrix3f spun) == true;
+        if (spinning)
         {
             displayed = displayed with { Orientation = spun };
         }
@@ -141,6 +143,19 @@ internal sealed class WorldPlacementTransforms
         if (Motions?.TryGetTransform(placement, FrameAlpha, out Vector3d moved, out Matrix3f movedOrientation) == true)
         {
             displayed = displayed with { Position = moved, Orientation = movedOrientation };
+            if (spinning)
+            {
+                // A spinning part on a moving carrier keeps turning: the mover rebuilt the
+                // orientation from the authored one, so the spin it overwrote is re-applied
+                // in the part's own frame. The spin is a right-multiplied local turn
+                // (authored * R), so R is the authored orientation transposed times the
+                // spun one, and the same turn on top of the moved orientation is the
+                // motion the original makes.
+                displayed = displayed with
+                {
+                    Orientation = movedOrientation * placement.Orientation.Transposed() * spun,
+                };
+            }
         }
 
         if (TryGetStandOrientation(placement, out Matrix3f stand))
