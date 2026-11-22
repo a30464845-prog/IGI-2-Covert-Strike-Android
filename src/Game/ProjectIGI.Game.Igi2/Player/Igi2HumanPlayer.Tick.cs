@@ -129,6 +129,7 @@ public sealed partial class Igi2HumanPlayer
             Channels[Igi2HumanChannel.Fire] = 0f;
         }
 
+        RunCutsceneClimb();
         Locomotion.Tick(this);
         Action.Tick(this);
         if (Channels.WasPressed(Igi2HumanChannel.ToggleWalkRun))
