@@ -29,7 +29,7 @@ namespace ProjectIGI.Game.Igi2.Interaction;
 /// </para>
 /// <para>It is still placed by the world scene, which reads its parameters by name (<see cref="IIgi2PlacedTask"/>).</para>
 /// </remarks>
-public sealed partial class Igi2LiftTask : Igi2Task, IIgi2PlacedTask, IIgi2Mover, IAttachParent
+public sealed partial class Igi2LiftTask : Igi2Task, IIgi2PlacedTask, IIgi2Mover, IAttachParent, IIgi2CameraTarget
 {
     /// <summary>The script name level data instantiates this type under.</summary>
     public const string TypeName = "Lift";
@@ -154,6 +154,12 @@ public sealed partial class Igi2LiftTask : Igi2Task, IIgi2PlacedTask, IIgi2Mover
 
     /// <inheritdoc/>
     public IReadOnlyList<float> CurrentOrientation => _orientation;
+
+    /// <inheritdoc/>
+    public Vector3d CameraTargetPosition => CurrentPosition;
+
+    /// <inheritdoc/>
+    public IReadOnlyList<float> CameraTargetOrientation => CurrentOrientation;
 
     /// <inheritdoc/>
     public Vector3d LastPosition => _lastPosition;

@@ -27,7 +27,7 @@ namespace ProjectIGI.Game.Igi2.World;
 /// and 0.2.
 /// </para>
 /// </remarks>
-public sealed partial class Igi2EditBoneObjTask : Igi2Task, IIgi2PlacedTask, Animation.IIgi2MorphTargets, Interaction.IIgi2Carried
+public sealed partial class Igi2EditBoneObjTask : Igi2Task, IIgi2PlacedTask, Animation.IIgi2MorphTargets, Interaction.IIgi2Carried, IIgi2CameraTarget
 {
     /// <summary>The script name level data instantiates this type under.</summary>
     public const string TypeName = "EditBoneObj";
@@ -55,6 +55,13 @@ public sealed partial class Igi2EditBoneObjTask : Igi2Task, IIgi2PlacedTask, Ani
     /// <summary>Gets or sets its turn, as three Euler angles.</summary>
     [ScriptParam(ScriptParamType.Real32x9, "Orientation")]
     public Vector3f Orientation { get; set; }
+
+    /// <inheritdoc/>
+    public Vector3d CameraTargetPosition => Position;
+
+    /// <inheritdoc/>
+    /// <remarks>The frame its draw uses.</remarks>
+    public IReadOnlyList<float> CameraTargetOrientation => EngineEuler.Rotation(Orientation.X, Orientation.Y, Orientation.Z);
 
     /// <summary>Gets or sets a value indicating whether its clip list starts again at its end.</summary>
     [ScriptParam(ScriptParamType.Bool8, "Loop animation list")]
