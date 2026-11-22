@@ -306,6 +306,19 @@ public sealed partial class Igi2ViewModelRenderer : ITitleViewModelPresenter, IT
             return (wanted.Position, wanted.Orientation);
         }
 
+        // A figure carried by a moving parent (a pilot in a helicopter seat) is drawn from the
+        // parent's blended transform, not from its own track: the track only spans consecutive
+        // ticks, and a catch-up burst (several ticks between renders, routine below 30 fps)
+        // snaps it to the newest tick while the parent still blends, which slides the figure
+        // out of its seat by up to a tick-step. The parent's Last/Current always span the last
+        // two ticks, so the carrier-derived pose follows the hull exactly at any tick gap.
+        // A figure carried by nothing, or by nothing that moves, falls through to its track.
+        if (instance is Igi2EditBoneObjTask carried
+            && carried.TryGetBlendedPose(blend, out Vector3d carriedPosition, out Matrix3f carriedOrientation))
+        {
+            return (carriedPosition, carriedOrientation);
+        }
+
         if (!_tracks.TryGetValue(instance, out Track? track))
         {
             track = new Track();

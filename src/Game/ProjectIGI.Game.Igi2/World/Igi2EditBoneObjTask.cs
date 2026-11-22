@@ -246,6 +246,28 @@ public sealed partial class Igi2EditBoneObjTask : Igi2Task, IIgi2PlacedTask, Ani
         }
     }
 
+    /// <summary>Where it is drawn this frame, from the carrier's blended transform.</summary>
+    /// <param name="blend">How far the frame is between the carrier's last two ticks, 0–1.</param>
+    /// <param name="position">Receives where it stands.</param>
+    /// <param name="orientation">Receives which way it faces.</param>
+    /// <returns>
+    /// <see langword="false"/> while it is carried by nothing, or by nothing that moves between ticks; the caller
+    /// then draws it from its own track.
+    /// </returns>
+    public bool TryGetBlendedPose(float blend, out Vector3d position, out Matrix3f orientation)
+    {
+        if (_attachment.TryResolveBlended(blend, out Vector3d at, out float[] frame))
+        {
+            position = at;
+            orientation = new Matrix3f(frame[0], frame[1], frame[2], frame[3], frame[4], frame[5], frame[6], frame[7], frame[8]);
+            return true;
+        }
+
+        position = default;
+        orientation = default;
+        return false;
+    }
+
     // AnimController_CreateHandler (animcontroller.c): a new controller steps itself and has no clip yet.
     private Igi2AnimController NewController()
     {
