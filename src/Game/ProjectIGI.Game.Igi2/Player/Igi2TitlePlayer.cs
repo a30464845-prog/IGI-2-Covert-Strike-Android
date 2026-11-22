@@ -52,6 +52,9 @@ public sealed partial class Igi2TitlePlayer : ITitlePlayer, ITitleFirstPerson, I
     /// <summary>Keeps the click that chose something on a screen from firing the gun, the input's <c>isFreezeFire</c>.</summary>
     internal void FreezeFire() => _reader.FreezeFire = true;
     private readonly float[] _frame = new float[Igi2HumanChannels.Count];
+
+    /// <summary>The aimbot cheat, which steers the frame's look channels onto a visible enemy.</summary>
+    private readonly Igi2Aimbot _aimbot = new();
     private readonly Igi2FirstPersonFrame _firstPerson = new();
     private long _ticks;
     private TitleFirstPersonView? _held;
@@ -745,6 +748,20 @@ public sealed partial class Igi2TitlePlayer : ITitlePlayer, ITitleFirstPerson, I
         // The cutscene climb driver reads whether a cutscene is running from the player.
         Human.IsCutsceneRunning = IsCutscenePlaying;
         Human.Ticks = (int)_ticks;
+
+        // The aimbot cheat steers the frame's look channels before the human reads them, so the
+        // retail view math still applies. Only while the first-person view is live: never during a
+        // cutscene, while the tactical computer is open, or in a third-person or death camera.
+        PlayerCheatOptions cheats = PlayerCheatOptions.Current;
+        if (cheats.Aimbot
+            && !IsCutscenePlaying
+            && !IsComputerShown
+            && Human.CameraMode == 1
+            && !Human.IsThirdPerson)
+        {
+            _aimbot.Steer(Human, Soldiers, CollisionWorld, cheats, _frame);
+        }
+
         Human.Update(_frame);
         Human.RunDelayed();
 

@@ -21,6 +21,7 @@ namespace ProjectIGI.Frontend.Screens;
 ///     Controls          (touch customizer, controls alpha/sensitivity, invert look, gyroscope)
 ///     Crosshair         (size, colour, outline)
 ///     Display &amp; readability (UI Size, Text Size)
+///     Aimbot            (steering strength, max distance, lock cone, aim part, target)
 ///
 /// Every setting the old flat list offered survives here with the same CVar binding and the same
 /// persistence (live write on change; OK calls SaveSettings + SaveProfiles). Nothing was dropped or
@@ -83,6 +84,9 @@ public sealed class SettingsScreen : ShellScreen
 
         /// <summary>UI Size and Text Size.</summary>
         Display,
+
+        /// <summary>Aimbot steering strength, max distance, lock cone, aim part, target.</summary>
+        Aimbot,
     }
 
     // The entry-time snapshots Cancel restores. Not readonly: OK refreshes them to the just-saved
@@ -112,6 +116,11 @@ public sealed class SettingsScreen : ShellScreen
     private float _initialCrosshairScale;
     private int _initialCrosshairColor;
     private bool _initialCrosshairOutline;
+    private float _initialAimbotStrength;
+    private float _initialAimbotMaxDistance;
+    private float _initialAimbotCone;
+    private AimbotAimPartKind _initialAimbotAimPart;
+    private AimbotTargetKind _initialAimbotTarget;
 
     private Section _section = Section.List;
     private ScrollView? _scroll;
@@ -154,6 +163,11 @@ public sealed class SettingsScreen : ShellScreen
         _initialCrosshairScale = HudCVars.CrosshairScale.Value;
         _initialCrosshairColor = HudCVars.CrosshairColor.Value;
         _initialCrosshairOutline = HudCVars.CrosshairOutline.Value;
+        _initialAimbotStrength = PlayerCheatCVars.AimbotStrength.Value;
+        _initialAimbotMaxDistance = PlayerCheatCVars.AimbotMaxDistance.Value;
+        _initialAimbotCone = PlayerCheatCVars.AimbotCone.Value;
+        _initialAimbotAimPart = PlayerCheatCVars.AimbotAimPart.Value;
+        _initialAimbotTarget = PlayerCheatCVars.AimbotTarget.Value;
     }
 
     /// <summary>
@@ -335,6 +349,9 @@ public sealed class SettingsScreen : ShellScreen
             case Section.Display:
                 BuildDisplaySection(stack, theme);
                 break;
+            case Section.Aimbot:
+                BuildAimbotSection(stack, theme);
+                break;
         }
 
         frame.AddChild(_scroll);
@@ -373,6 +390,7 @@ public sealed class SettingsScreen : ShellScreen
         AddTab(strip, theme, "Controls", Section.Controls, section);
         AddTab(strip, theme, "Crosshair", Section.Crosshair, section);
         AddTab(strip, theme, "Display & readability", Section.Display, section);
+        AddTab(strip, theme, "Aimbot", Section.Aimbot, section);
         return strip;
     }
 
@@ -456,6 +474,7 @@ public sealed class SettingsScreen : ShellScreen
         AddSectionRow(stack, theme, "Controls", Section.Controls);
         AddSectionRow(stack, theme, "Crosshair", Section.Crosshair);
         AddSectionRow(stack, theme, "Display & readability", Section.Display);
+        AddSectionRow(stack, theme, "Aimbot", Section.Aimbot);
     }
 
     /// <summary>One section row: its name on the left, a chevron on the right that says it opens a sub-screen.</summary>
@@ -1015,6 +1034,102 @@ public sealed class SettingsScreen : ShellScreen
     }
 
     /// <summary>
+    /// Aimbot: how the cheat steers the view, once it is on. The switch itself is not here — it
+    /// lives in the cheat menu on the main menu, next to the other cheats — so these rows only tune
+    /// the steering; turning the cheat on and off is the menu's job. Every row writes live and is
+    /// saved by OK, discarded by Back/Cancel, like every other setting here.
+    /// </summary>
+    private void BuildAimbotSection(StackPanel stack, UiTheme theme)
+    {
+        var intro = new Label(
+            theme.Body,
+            "The Aimbot switch itself is in the cheat menu on the main menu. These rows tune how it steers, once it is on.",
+            20f,
+            theme.TextSecondary)
+        {
+            Width = RowWidthUnits,
+            Wrap = true,
+            Margin = new Thickness(0f, 18f, 0f, 6f),
+        };
+        stack.AddChild(intro);
+
+        // ── Aimbot Strength: how fast the view steers (0% to 100%) ─────────
+        // A share of the full rate (0.25 rad/tick): 50% is 0.125 rad/tick, a smooth pull rather
+        // than a snap; 100% is the full rate. 0% steers nothing, so the cheat is effectively off
+        // even while its switch is on.
+        int initialStrengthPct = (int)Math.Round(PlayerCheatCVars.AimbotStrength.Value * 100f);
+        var strengthSlider = new Slider(theme, "Aimbot Strength", 0f, 100f, initialStrengthPct, 5f)
+        {
+            Width = RowWidthUnits,
+            Height = RowHeightUnits,
+        };
+        strengthSlider.ValueChanged += value =>
+        {
+            PlayerCheatCVars.AimbotStrength.Value = Math.Clamp(value / 100f, 0f, 1f);
+        };
+        stack.AddChild(strengthSlider);
+
+        // ── Max Distance: how far away the aimbot looks (10 m to 100 m) ─────
+        // Enemies past this are not considered, however close to the crosshair they sit.
+        int initialDistance = (int)Math.Round(PlayerCheatCVars.AimbotMaxDistance.Value);
+        var distanceSlider = new Slider(theme, "Max Distance", 10f, 100f, initialDistance, 5f)
+        {
+            Width = RowWidthUnits,
+            Height = RowHeightUnits,
+        };
+        distanceSlider.ValueChanged += value =>
+        {
+            PlayerCheatCVars.AimbotMaxDistance.Value = Math.Clamp(value, 10f, 100f);
+        };
+        stack.AddChild(distanceSlider);
+
+        // ── Lock Cone: how wide the aimbot looks around the crosshair ───────
+        // In degrees from the crosshair, either side: 27° is IGI 1's aim-lock cone. Narrower means
+        // the aimbot only takes enemies the player is already nearly aiming at; wider lets it swing
+        // onto enemies off to the side.
+        int initialCone = (int)Math.Round(PlayerCheatCVars.AimbotCone.Value);
+        var coneSlider = new Slider(theme, "Lock Cone", 5f, 60f, initialCone, 1f)
+        {
+            Width = RowWidthUnits,
+            Height = RowHeightUnits,
+        };
+        coneSlider.ValueChanged += value =>
+        {
+            PlayerCheatCVars.AimbotCone.Value = Math.Clamp(value, 5f, 60f);
+        };
+        stack.AddChild(coneSlider);
+
+        // ── Aim Part: where on the target the aimbot aims ───────────────────
+        // Chest is the middle of the body, about 0.95 m above the feet; Head is the eyes.
+        string[] aimPartLabels = ["Chest", "Head"];
+        var aimPartCycler = new ConceptCyclerRow(theme, "Aim Part", aimPartLabels, (int)PlayerCheatCVars.AimbotAimPart.Value)
+        {
+            Width = RowWidthUnits,
+            Height = RowHeightUnits,
+        };
+        aimPartCycler.SelectionChanged += index =>
+        {
+            PlayerCheatCVars.AimbotAimPart.Value = (AimbotAimPartKind)index;
+        };
+        stack.AddChild(aimPartCycler);
+
+        // ── Target: which visible enemy the aimbot picks ─────────────────────
+        // Closest to the crosshair is the enemy the player is already nearly aiming at; Nearest is
+        // the closest enemy in the cone, wherever the crosshair sits.
+        string[] targetLabels = ["Closest to crosshair", "Nearest"];
+        var targetCycler = new ConceptCyclerRow(theme, "Target", targetLabels, (int)PlayerCheatCVars.AimbotTarget.Value)
+        {
+            Width = RowWidthUnits,
+            Height = RowHeightUnits,
+        };
+        targetCycler.SelectionChanged += index =>
+        {
+            PlayerCheatCVars.AimbotTarget.Value = (AimbotTargetKind)index;
+        };
+        stack.AddChild(targetCycler);
+    }
+
+    /// <summary>
     /// The bottom bar, inside the frame: BACK at the bottom-left — the concept's back action, still
     /// Cancel — SECTIONS beside it on sub-screens, OK and Cancel at the bottom-right. All four are
     /// plain text in the concept's grey-to-white, no boxes and no blue: the old blue menu buttons
@@ -1136,6 +1251,11 @@ public sealed class SettingsScreen : ShellScreen
         HudCVars.CrosshairScale.Value = _initialCrosshairScale;
         HudCVars.CrosshairColor.Value = _initialCrosshairColor;
         HudCVars.CrosshairOutline.Value = _initialCrosshairOutline;
+        PlayerCheatCVars.AimbotStrength.Value = _initialAimbotStrength;
+        PlayerCheatCVars.AimbotMaxDistance.Value = _initialAimbotMaxDistance;
+        PlayerCheatCVars.AimbotCone.Value = _initialAimbotCone;
+        PlayerCheatCVars.AimbotAimPart.Value = _initialAimbotAimPart;
+        PlayerCheatCVars.AimbotTarget.Value = _initialAimbotTarget;
         if (Context.Config.Active is { } profile)
         {
             profile.InvertMouse = _initialInvert;

@@ -181,7 +181,7 @@ public sealed partial class GameHost
         }
 
         float modalW = Math.Min(700f * scale, width - (32f * scale));
-        float modalH = Math.Min(410f * scale, height - (32f * scale));
+        float modalH = Math.Min(472f * scale, height - (32f * scale));
         float modalX = (width - modalW) * 0.5f;
         float modalY = (height - modalH) * 0.5f;
 
@@ -252,6 +252,16 @@ public sealed partial class GameHost
         if (ToggleRow(r3Y))
         {
             PlayerCheatCVars.UnlockAllLevels.Value = !PlayerCheatCVars.UnlockAllLevels.Value;
+            state.Console.SaveSettings();
+            HostConfiguration.Save(_configuration, _logger);
+            return;
+        }
+
+        // Row 4: Aimbot
+        float r4Y = contentY + (rowHeight * 4f);
+        if (ToggleRow(r4Y))
+        {
+            PlayerCheatCVars.Aimbot.Value = !PlayerCheatCVars.Aimbot.Value;
             state.Console.SaveSettings();
             HostConfiguration.Save(_configuration, _logger);
             return;
@@ -363,7 +373,7 @@ public sealed partial class GameHost
             painter.FillRect(new UiRect(0f, 0f, width, height), Bgra32.FromRgba(0, 0, 0, 215));
 
             float modalW = Math.Min(700f * scale, width - (32f * scale));
-            float modalH = Math.Min(410f * scale, height - (32f * scale));
+            float modalH = Math.Min(472f * scale, height - (32f * scale));
             float modalX = (width - modalW) * 0.5f;
             float modalY = (height - modalH) * 0.5f;
 
@@ -435,6 +445,7 @@ public sealed partial class GameHost
             DrawCheatRow(1, "INFINITE AMMUNITION", "Magazines stay filled, reserves never deplete while firing", PlayerCheatCVars.InfiniteAmmo.Value);
             DrawCheatRow(2, "ALL WEAPONS", "Adds all weapons into inventory for the mission", PlayerCheatCVars.AllWeapons.Value);
             DrawCheatRow(3, "UNLOCK ALL MISSIONS", $"All {_missions.InProgressionOrder().Count()} missions are selectable in Campaign", PlayerCheatCVars.UnlockAllLevels.Value);
+            DrawCheatRow(4, "AIMBOT", "Steer the view onto a visible enemy in front of the player", PlayerCheatCVars.Aimbot.Value);
 
             // The last finished run, when there is one, is the proof it ran: date, tier picked
             // and per-tier 1% low FPS, from r_benchmark_last. A run that was skipped writes
@@ -447,7 +458,7 @@ public sealed partial class GameHost
                     ? $"LAST BENCHMARK: {BenchmarkCVars.LastRun.Value}"
                     : "NO BENCHMARK RUN YET - START ONE FROM THE BENCHMARK BUTTON.";
                 painter.DrawText(tpFoot.Mono, lastRun,
-                    new UiVec2(modalX + (20f * scale), modalY + (322f * scale)),
+                    new UiVec2(modalX + (20f * scale), modalY + (384f * scale)),
                     11f * scale, textSecondary);
             }
 
