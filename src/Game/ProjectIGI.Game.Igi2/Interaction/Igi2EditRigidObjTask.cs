@@ -133,10 +133,8 @@ public sealed partial class Igi2EditRigidObjTask
             Igi2CollisionWorld.Repose(_solids, models, Model, Igi2Pose.FromMatrix(_position, new Matrix3f(m[0], m[1], m[2], m[3], m[4], m[5], m[6], m[7], m[8])), Magic);
         }
 
-        foreach (GameTask child in Children)
-        {
-            (child as IIgi2Attached)?.UpdateAttachment();
-        }
+        // ModelObj_UpdateAttachments: what it carries follows it.
+        Igi2Attachment.UpdateChildren(this);
     }
 
     /// <inheritdoc/>

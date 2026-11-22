@@ -183,6 +183,7 @@ internal static class Igi2InteractionSystems
                 prop.Magic = b.Magic;
                 prop.Bind(b.Player.CollisionWorld.SolidsOf(Igi2EditRigidObjTask.TypeName, prop.Id));
                 b.Movers.Add(prop);
+                Igi2Attachment.AttachChildren(prop, prop);
             }
         }
     }
