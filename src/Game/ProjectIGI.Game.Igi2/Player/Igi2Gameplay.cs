@@ -101,6 +101,7 @@ public sealed class Igi2Gameplay : ITitleGameplay
         Igi2PlayerWeapons? weapons = Arm(request.Services, request.World.LevelRoot, tuning, clips);
         Igi2Sounds sounds = LevelSounds(request);
         Igi2TitlePlayer player = Igi2TitlePlayer.Spawn(world, general, spawn.Position, spawn.Gamma, request.Difficulty, clips, rig, weapons, arms, sounds);
+        player.Spins = request.Built.Spins;
         player.GameConfig = request.Services.TryGet(out Config.Igi2GameConfig? gameConfig) ? gameConfig : null;
         player.ModelAttachments = new Igi2ModelAttachments(models,
             request.Services.TryGet(out Igi2MagicObjTypes? attachmentTypes) ? attachmentTypes : null);

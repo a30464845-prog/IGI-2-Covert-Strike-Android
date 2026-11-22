@@ -197,6 +197,13 @@ public sealed partial class Igi2TitlePlayer : ITitlePlayer, ITitleFirstPerson, I
     /// <inheritdoc/>
     public IPlacementVisibility? Visibility { get; set; }
 
+    /// <summary>Gets or sets the placements this level turns on the spot, or <see langword="null"/> for none.</summary>
+    /// <remarks>
+    /// The scene walk's spin registry, handed to the player with its creation request. Project I.G.I. has no
+    /// such thing, so it is always <see langword="null"/> there; I.G.I. 2's <c>RotateAttachment</c> is one.
+    /// </remarks>
+    public IPlacementSpin? Spins { get; set; }
+
     /// <summary>Gets or sets the level's tick the player runs inside, or <see langword="null"/> to run the player alone.</summary>
     public Igi2LevelRun? Level { get; set; }
 
@@ -605,6 +612,13 @@ public sealed partial class Igi2TitlePlayer : ITitlePlayer, ITitleFirstPerson, I
         Casings?.Run();
         ReadBinoculars();
         Sounds.Run();
+
+        // The level's fans and radar heads, one tick further round. Unconditional and cheap: it is a
+        // counter, and the renderer turns the transform from it when it draws. Project I.G.I.'s own tick
+        // advances its own registry; this is the sequel's, and only the sequel's -- the title player
+        // exists for I.G.I. 2 alone, so the first game never reaches it, and the shared host tick would
+        // advance both.
+        Spins?.Advance();
         _ticks++;
 
         // What the tick changed, told once it is over; nothing in it reads what a listener does.
