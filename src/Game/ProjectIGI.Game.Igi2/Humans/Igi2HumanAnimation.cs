@@ -202,7 +202,9 @@ public sealed class Igi2HumanAnimation : IIgi2HumanAnimation
     /// </remarks>
     public void PlayNamed(string name, int time, float blendSeconds)
     {
-        Igi2AnimationClip? clip = _rig is null ? null : _library?.Find(_rig, name);
+        // As ClipForState does for state rows: a named clip that does not resolve falls back to the rig's
+        // stand clip, so the body is never left clip-less with a stale Ended bit.
+        Igi2AnimationClip? clip = FindClip(name) ?? FindClip(UnarmedClip);
         SetAnimation(clip, time, blendSeconds);
         LastState = NamedStateFallback;
         if (clip is null || _weaponClips() is not { } clips)
@@ -232,7 +234,7 @@ public sealed class Igi2HumanAnimation : IIgi2HumanAnimation
 
     /// <inheritdoc/>
     public void PlayUpperBodyNamed(string name, int time, float blendSeconds) =>
-        SetUpperBody(_rig is null ? null : _library?.Find(_rig, name), time, blendSeconds);
+        SetUpperBody(FindClip(name) ?? FindClip(UnarmedClip), time, blendSeconds);
 
     /// <inheritdoc/>
     /// <remarks>The weapon's clip must not be <c>stand_lowerbody</c>, the empty upper body (<c>dword_68F6C4</c>).</remarks>
