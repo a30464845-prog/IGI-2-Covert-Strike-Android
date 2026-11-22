@@ -161,10 +161,15 @@ public sealed class SettingsScreen : ShellScreen
     /// lit and selected text, neutral greys for the rest — with larger text and rows. The shared theme
     /// is never mutated. White replaces the shell's blue accent, so slider fills and toggle knobs read
     /// white instead of blue; the amber/blue of the old look is gone from this screen entirely.
+    /// Text is set in the regular body face (Barlow-Regular) in the heading and display slots, not
+    /// the design's condensed faces: the narrow condensed caps were hard to read at phone sizes
+    /// (Ray 2026-11-22). The body face is already loaded, so this costs no new font, and the shared
+    /// typography is untouched — the HUD, the tactical computer and the retail menu keep the design
+    /// faces.
     /// </summary>
     private static UiTheme LargeTheme(UiTheme shared)
     {
-        return new UiTheme(shared.Body, shared.Heading, shared.Mono, shared.Display)
+        return new UiTheme(shared.Body, shared.Body, shared.Mono, shared.Body)
         {
             BodyTextSize = 24f,
             HeadingTextSize = 52f,
@@ -371,10 +376,10 @@ public sealed class SettingsScreen : ShellScreen
         return strip;
     }
 
-    /// <summary>One tab: a header tab with its underline off, so the concept's plain text tabs — grey, white when current — are what shows.</summary>
+    /// <summary>One tab: a header tab with its underline off, so the concept's plain text tabs — grey, white when current — are what shows, each inside its own visible border (<see cref="ConceptTab"/>).</summary>
     private void AddTab(FlexPanel strip, UiTheme theme, string caption, Section target, Section current)
     {
-        var tab = new HeaderTab(theme, caption)
+        var tab = new ConceptTab(theme, caption)
         {
             ShowsUnderline = false,
             Selected = target == current,
@@ -383,6 +388,47 @@ public sealed class SettingsScreen : ShellScreen
         };
         tab.Activated += _ => GoToSection(target);
         strip.Add(tab);
+    }
+
+    /// <summary>
+    /// One section tab with a visible border. The plain text tabs were unreadable as a bar — grey
+    /// on black with no edge, and the underline off — so each tab draws its own outline: a dim grey
+    /// hairline when it is not current, a white 2-unit border with a faint wash when it is, so the
+    /// active section is obvious at a glance. Labels, order and behaviour are exactly
+    /// <see cref="HeaderTab"/>'s; only the outline is added.
+    /// </summary>
+    private sealed class ConceptTab : HeaderTab
+    {
+        /// <summary>Initializes a new instance of the <see cref="ConceptTab"/> class.</summary>
+        /// <param name="theme">The theme.</param>
+        /// <param name="caption">The caption.</param>
+        public ConceptTab(UiTheme theme, string caption)
+            : base(theme, caption)
+        {
+        }
+
+        /// <inheritdoc/>
+        protected override void OnDraw(UiPainter painter)
+        {
+            base.OnDraw(painter);
+
+            UiRect b = Bounds;
+            if (b.IsEmpty)
+            {
+                return;
+            }
+
+            float appear = Visual.Appear;
+            if (Selected)
+            {
+                painter.FillRect(b, UiPalette.Fade(Theme.Selection, appear));
+            }
+
+            float thickness = painter.Context.Px(Selected ? 2f : 1f);
+            float half = thickness * 0.5f;
+            var inner = new UiRect(b.X + half, b.Y + half, b.Width - thickness, b.Height - thickness);
+            painter.StrokeRect(inner, thickness, UiPalette.Fade(Selected ? Theme.TextBright : Theme.TextMuted, appear));
+        }
     }
 
     /// <summary>The section list: one 48 dp row per section, with the save/cancel rule stated on screen.</summary>

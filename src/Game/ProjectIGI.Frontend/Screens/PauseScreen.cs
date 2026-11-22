@@ -218,6 +218,10 @@ public sealed class PauseScreen : ShellScreen
     /// hover / press states, same hit area (<c>PointerBounds</c> inherited) —
     /// only the drawing changes. Text stays <see cref="IgiMenuButton.NormalColor"/> /
     /// <see cref="IgiMenuButton.HoverColor"/>, so Abort Mission keeps its red.
+    /// The label is set in the theme's regular body face, not the condensed
+    /// heading face: the narrow condensed caps were hard to read at phone
+    /// sizes (Ray 2026-11-22), and the body face is already loaded, so this
+    /// costs no new font.
     /// </summary>
     private sealed class PauseButton : IgiMenuButton
     {
@@ -271,21 +275,24 @@ public sealed class PauseScreen : ShellScreen
                 new UiRect(b.X + cut, b.Bottom - edge - strip, b.Width - (cut * 2f), strip),
                 Bgra32.FromRgba(0, 0, 0, 48));
 
-            // Centred caps label with letterspacing, like the concept.
+            // Centred caps label with letterspacing, like the concept, in the
+            // regular body face for readability (see the class note above).
             float size = painter.Context.Px(TextSize);
             float tracking = size * 0.10f;
-            float width = UiPainter.MeasureTracked(_theme.Heading, Text, size, tracking) - tracking;
+            float width = UiPainter.MeasureTracked(_theme.Body, Text, size, tracking) - tracking;
             float tx = b.X + ((b.Width - width) * 0.5f);
             float ty = b.Y + ((b.Height - size) * 0.5f);
             Bgra32 color = isHovered ? HoverColor : NormalColor;
-            painter.DrawTextTracked(_theme.Heading, Text, new UiVec2(tx, ty + painter.Context.Px(2f)), size, Bgra32.FromRgba(0, 0, 0, 170), tracking);
-            painter.DrawTextTracked(_theme.Heading, Text, new UiVec2(tx, ty), size, color, tracking);
+            painter.DrawTextTracked(_theme.Body, Text, new UiVec2(tx, ty + painter.Context.Px(2f)), size, Bgra32.FromRgba(0, 0, 0, 170), tracking);
+            painter.DrawTextTracked(_theme.Body, Text, new UiVec2(tx, ty), size, color, tracking);
         }
     }
 
     /// <summary>
     /// The concept's title: "GAME PAUSED" in white caps, centred, letterspaced,
-    /// drawn above the panel instead of inside a header band.
+    /// drawn above the panel instead of inside a header band. Set in the
+    /// regular body face, not the condensed display face, for readability —
+    /// same reason as the button labels above.
     /// </summary>
     private sealed class PauseTitle : UiElement
     {
@@ -313,11 +320,11 @@ public sealed class PauseScreen : ShellScreen
             const string text = "GAME PAUSED";
             float size = painter.Context.Px(TextSize);
             float tracking = size * 0.12f;
-            float width = UiPainter.MeasureTracked(_theme.Heading, text, size, tracking) - tracking;
+            float width = UiPainter.MeasureTracked(_theme.Body, text, size, tracking) - tracking;
             float tx = b.X + ((b.Width - width) * 0.5f);
             float ty = b.Y + ((b.Height - size) * 0.5f);
-            painter.DrawTextTracked(_theme.Heading, text, new UiVec2(tx, ty + painter.Context.Px(2f)), size, Bgra32.FromRgba(0, 0, 0, 170), tracking);
-            painter.DrawTextTracked(_theme.Heading, text, new UiVec2(tx, ty), size, Bgra32.White, tracking);
+            painter.DrawTextTracked(_theme.Body, text, new UiVec2(tx, ty + painter.Context.Px(2f)), size, Bgra32.FromRgba(0, 0, 0, 170), tracking);
+            painter.DrawTextTracked(_theme.Body, text, new UiVec2(tx, ty), size, Bgra32.White, tracking);
         }
     }
 
