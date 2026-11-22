@@ -88,7 +88,7 @@ public sealed partial class GameHost
         // and both need the same presentation blend to remain welded together at uncapped rates.
         //
         // Off entirely while the pause menu is up, and this is what makes a paused frame actually
-        // still. Nothing is stepping, so the last two ticks stay where they are — while the blend
+        // still. Nothing is stepping, so the last two ticks stay where they are â€” while the blend
         // between them keeps sweeping 0 to 1 with real time, which rocked the eye, the arms and
         // every guard back and forth between two poses a thirtieth of a second apart. At blend 1
         // every one of those readings is simply the tick that was last run.
@@ -97,15 +97,16 @@ public sealed partial class GameHost
         // camera and its parent vehicle stay on the current record makes a seated actor sweep
         // backwards after every tick, then glide forwards again. Retail presents the cinematic
         // transform set atomically, so keep the actor on that same current tick as its plane/train.
-        // A title cutscene -- I.G.I. 2's, whose MissionState.Cutscenes is never assigned -- suppresses smooth
-        // presentation for the world, as a cutscene of the first game's does: its actors, effects and particles
-        // stay on the tick the cutscene placed, the cinematic transform set atomically. The title camera's own
-        // blend below is not part of that gate: it still sweeps between the cutscene's ticks, or the camera
-        // would stay a 30 Hz staircase while the extra renders r_smooth already runs went to waste.
+        // A title cutscene -- I.G.I. 2's, whose MissionState.Cutscenes is never assigned -- used to
+        // suppress smooth presentation for the world, as a cutscene of the first game's does. That
+        // left the set split: the title camera below still sweeps between the cutscene's ticks
+        // while every mover stays on the current tick, so a cutscene aircraft jumps forward a
+        // tick-step at each tick and slides back against the gliding camera between ticks. The
+        // world now blends on the same tick fraction as the camera, so hull, actors and camera
+        // glide together; particles keep their own atomic blend (see DrawForwardPass).
         bool titleCutscene = TitlePlayer is { IsCutscenePlaying: true };
         bool smoothPresentation = !_menuFlow.PauseMenu
             && _mission.Cutscenes?.IsPlaying != true
-            && !titleCutscene
             && (!_options.Lockstep || _options.CaptureRate > _loop.Clock.TickRate)
             && FrameCVars.SmoothPresentation.Value;
         double pacingWall = _loop.Clock.FrameInstantMilliseconds;
@@ -182,7 +183,7 @@ public sealed partial class GameHost
     private void ResolveMapScene(ref FrameView view)
     {
         // The map's own view of the level, when the computer owns the frame. Under the tactical
-        // interface the transition owns it for as long as it is flying — same viewport, but its
+        // interface the transition owns it for as long as it is flying â€” same viewport, but its
         // camera and its field of view, which is what makes the climb and the fall a move of the
         // player's own eye rather than a cut to a second one.
         MapSceneView? mapScene = null;
