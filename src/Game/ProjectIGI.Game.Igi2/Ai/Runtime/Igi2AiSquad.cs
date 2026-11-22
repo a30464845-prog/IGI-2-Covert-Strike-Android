@@ -230,6 +230,43 @@ public sealed partial class Igi2AiSquad
     }
 
     /// <summary>
+    /// A tick of the squad during a cutscene (<c>AISquad_RunHandler</c>, cutscene-mode): the same tick as
+    /// <see cref="Run"/>, except the combat lines are held — no fire order, no target-list ageing, no combat-idle
+    /// events — so the squad's own choreography (its script on the waiting events, its action stack) still reaches
+    /// its members while the squad never switches to combat mid-scene. The members' minds run cutscene-mode at
+    /// the body's delayed pass either way; this is the feeder that keeps their action stacks from draining dry.
+    /// </summary>
+    public void RunCutscene()
+    {
+        UpdateMemberCount();
+        MaintainPlayingSounds();
+        if (IsDead)
+        {
+            return;
+        }
+
+        if (_actions.Count == 0)
+        {
+            PushIdle();
+        }
+
+        MaintainMisc();
+
+        // Every action's event handler is AISquad_SquadActionDefaultEventHandler: the script handles the events.
+        if (_events.Count > 0)
+        {
+            RunScriptOnEvents();
+        }
+
+        if (_actions.Count == 0)
+        {
+            PushIdle();
+        }
+
+        RunActionStack();
+    }
+
+    /// <summary>
     /// Tells the squad of an event (<c>AISquad_ReceiveEvent</c>): a sighting, a hit or a dead friend makes it tense; while it is
     /// rushing it ignores the small sounds; a sighting adds or refreshes a target (the first target pulls its members off what they
     /// were doing, and the player first seen by any squad counts as detected). An event of a kind already waiting that one member
