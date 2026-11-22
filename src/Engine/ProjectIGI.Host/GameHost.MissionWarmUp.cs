@@ -194,14 +194,15 @@ public sealed partial class GameHost
     /// that walked off during the hold, would be one the player never saw begin.
     /// </summary>
     /// <remarks>
-    /// Released as the reveal BEGINS rather than as it ends: the level's intro has to be on its first
-    /// frame by the time the picture clears, and it cannot be until the level has ticked. Under the
-    /// dissolve its first moments are seen arriving, which is what a dissolve is for; after it they would
-    /// be a second of the player's own view before the cut.
+    /// Held until the loading screen is fully completed, through the reveal as well as the hold: nothing
+    /// may run until the sequence is idle, so a cut-scene starts on its first frame only once the card is
+    /// gone, and none of it plays under the loading screen. The reveal dissolves the held picture into
+    /// the level's opening frame, which is final already -- its lighting converged during the hold -- so
+    /// holding the tick costs the dissolve nothing.
     /// </remarks>
     private bool PresentationHoldsLevel =>
         IsWarmingUp
-        || _loadSequence.Phase is MissionLoadPhase.Depart or MissionLoadPhase.Hold
+        || _loadSequence.IsActive
         || _entry.IsCameraActive;
 
     /// <summary>Whether a loading screen may be drawn at all this run.</summary>
