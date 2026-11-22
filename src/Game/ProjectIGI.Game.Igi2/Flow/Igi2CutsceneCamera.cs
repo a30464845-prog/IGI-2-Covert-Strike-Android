@@ -259,9 +259,13 @@ public static class Igi2CutsceneCameras
         Igi2HumanSoldierTask soldier => new LiveTarget(
             () => soldier.Body?.Position ?? soldier.Position,
             () => Rows(soldier.Body?.Orientation ?? Matrix3f.Identity)),
-        Igi2HumanPlayerTask player when player.Human is { } human => new LiveTarget(
-            () => human.Position,
-            () => Rows(human.Orientation)),
+        // Jones never moves during a cutscene -- no code drives him but live input -- so aiming at his
+        // live position pins the camera on his spawn point and throws away the shot's authored aim, which
+        // is what follows the character (upstream has no player arm and keeps the authored frame).
+        // Return null so Interpolate keeps the authored aim; revisit when a Jones staging driver moves
+        // him through cutscenes. This also keeps the player task out of the GameTask fallback below,
+        // whose script Position is the same spawn point.
+        Igi2HumanPlayerTask => null,
         Igi2CarTask car => new LiveTarget(() => car.CurrentPosition, () => car.CurrentOrientation),
         Igi2TrainTask train => new LiveTarget(() => train.CurrentPosition, () => train.CurrentOrientation),
         GameTask named when named.TryGetScriptValue("Position", out object? value) && value is Vector3d position
