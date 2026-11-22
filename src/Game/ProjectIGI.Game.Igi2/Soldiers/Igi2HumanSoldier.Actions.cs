@@ -357,7 +357,7 @@ public sealed partial class Igi2HumanSoldier
             Igi2WeaponTypeKind.Shotgun => "shotgun",
             _ => string.Empty,
         };
-        if ((Animation.FindClip(action + "_" + held.WeaponAnimationName) ?? Animation.FindClip(action + "_" + kind) ?? Animation.FindClip(action))
+        if ((Animation.FindClip((action + "_" + held.WeaponAnimationName).ToLowerInvariant()) ?? Animation.FindClip(action + "_" + kind) ?? Animation.FindClip(action))
             is not { } clip)
         {
             Go(Igi2SoldierState.Stand);
