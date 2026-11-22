@@ -75,18 +75,11 @@ public sealed partial class GameHost
     /// <c>r_frame_limit</c> is held by NVIDIA Reflex where its runtime runs, which caps the frame without
     /// adding the queueing a sleeping loop does; everywhere else the loop waits out the remainder itself. The
     /// menu has nothing to gain past the display's rate, so without vertical sync it is held there too.
-    /// A cutscene is held to 50 fps: the simulation still ticks at 30 Hz on wall-clock deadlines, so the
-    /// cutscene plays at normal speed, and the camera still interpolates by
-    /// tick time. The title player's signal is IGI 2's, so the host's own cutscenes (IGI 1) are untouched.
     /// </remarks>
     private int FrameRateCap(bool menuMode)
     {
         int cap = ReconstructionCVars.FrameLimit.Value;
-        if (!menuMode && TitlePlayer is { IsCutscenePlaying: true })
-        {
-            cap = cap > 0 ? Math.Min(cap, 50) : 50;
-        }
-        else if (menuMode && !FrameCVars.VSync.Value)
+        if (menuMode && !FrameCVars.VSync.Value)
         {
             int display = _window.RefreshRate > 0 ? _window.RefreshRate : 60;
             cap = cap > 0 ? Math.Min(cap, display) : display;
