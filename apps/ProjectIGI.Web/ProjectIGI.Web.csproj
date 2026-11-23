@@ -1,0 +1,112 @@
+<Project Sdk="Microsoft.NET.Sdk.WebAssembly">
+
+  <!-- The game in a browser over the fork's tree: the same host as the Android build's, over the canvas,
+       WebGPU and the files the person picked. Built with `dotnet publish`; the page is wwwroot/index.html
+       in the publish output. The page itself is shared with apps/OpenIGI.Web (linked below); only main.js
+       is this app's own, because it boots exports.ProjectIGI.Web.Program. -->
+  <PropertyGroup>
+    <RuntimeIdentifier>browser-wasm</RuntimeIdentifier>
+    <OutputType>Exe</OutputType>
+    <!-- The JavaScript interop's generated marshalling is unsafe code. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <WasmMainJSPath>wwwroot/main.js</WasmMainJSPath>
+    <!-- The runtime's loader gets a content hash in its name like every other file under _framework, and
+         index.html an import map to it, so a host can cache _framework for good and a new build is never
+         run against a browser's copy of the last one. The page's own scripts keep their names and are
+         revalidated on every load instead (hosting/apache/.htaccess). -->
+    <WasmFingerprintDotnetJs>true</WasmFingerprintDotnetJs>
+    <OverrideHtmlAssetPlaceholders>true</OverrideHtmlAssetPlaceholders>
+    <!-- Links the browser's webgpu.h into the runtime (WgpuBrowser.props). -->
+    <WasmBuildNative>true</WasmBuildNative>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <!-- A level's buffers and textures are hundreds of megabytes; start with room for them and allow the
+         whole 32-bit address space. -->
+    <EmccInitialHeapSize>536870912</EmccInitialHeapSize>
+    <EmccMaximumHeapSize>4294967296</EmccMaximumHeapSize>
+  </PropertyGroup>
+
+  <!-- The release build is the one a player runs, so it is the optimised one without flags to remember:
+       `dotnet publish -c Release` compiles the managed code ahead of time to WebAssembly (the interpreter
+       it replaces runs the frame several times slower), optimises the native link for speed rather than
+       size, and trims what nothing reaches. The publish also writes .br and .gz beside every file, which
+       a host serves with Content-Encoding. A Debug build stays interpreted, for build speed. -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <RunAOTCompilation>true</RunAOTCompilation>
+    <WasmEnableSIMD>true</WasmEnableSIMD>
+    <EmccCompileOptimizationFlag>-O3</EmccCompileOptimizationFlag>
+    <EmccLinkOptimizationFlag>-O3</EmccLinkOptimizationFlag>
+    <PublishTrimmed>true</PublishTrimmed>
+    <DebuggerSupport>false</DebuggerSupport>
+    <EventSourceSupport>false</EventSourceSupport>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ProjectIGI.Composition\ProjectIGI.Composition.csproj" />
+    <ProjectReference Include="..\..\src\Audio\ProjectIGI.Audio\ProjectIGI.Audio.csproj" />
+    <ProjectReference Include="..\..\src\Audio\ProjectIGI.Audio.Web\ProjectIGI.Audio.Web.csproj" />
+    <ProjectReference Include="..\..\src\Core\ProjectIGI.Core\ProjectIGI.Core.csproj" />
+    <ProjectReference Include="..\..\src\Engine\ProjectIGI.Engine\ProjectIGI.Engine.csproj" />
+    <ProjectReference Include="..\..\src\Engine\ProjectIGI.Host\ProjectIGI.Host.csproj" />
+    <ProjectReference Include="..\..\src\Platform\ProjectIGI.Platform\ProjectIGI.Platform.csproj" />
+    <ProjectReference Include="..\..\src\Platform\ProjectIGI.Platform.Web\ProjectIGI.Platform.Web.csproj" />
+    <ProjectReference Include="..\..\src\Rendering\ProjectIGI.Rendering\ProjectIGI.Rendering.csproj" />
+    <ProjectReference Include="..\..\src\Rendering\ProjectIGI.Rendering.Pipeline\ProjectIGI.Rendering.Pipeline.csproj" />
+    <ProjectReference Include="..\..\src\Rendering\ProjectIGI.Rendering.WebGpu\ProjectIGI.Rendering.WebGpu.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The host's assets (apps/ProjectIGI.Composition/Assets), served beside the page with a list of them in
+         host-assets.json. The page writes them where the host looks, /Assets in the runtime's file system,
+         since the application's directory there is the root. This is the fork's set (the mission images,
+         boot-bg.png and loading.png among them), not upstream's. -->
+    <HostAsset Include="..\ProjectIGI.Composition\Assets\**\*"
+               Exclude="..\ProjectIGI.Composition\Assets\**\*.md;..\ProjectIGI.Composition\Assets\**\.gitignore" />
+    <Content Include="@(HostAsset)"
+             Link="wwwroot\Assets\%(RecursiveDir)%(Filename)%(Extension)"
+             CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <Target Name="ListHostAssets" BeforeTargets="AssignTargetPaths">
+    <PropertyGroup>
+      <_HostAssetList>$(IntermediateOutputPath)host-assets.json</_HostAssetList>
+    </PropertyGroup>
+    <ItemGroup>
+      <_HostAssetLine Include="@(HostAsset->'&quot;Assets/%(RecursiveDir)%(Filename)%(Extension)&quot;'->Replace('\', '/'))" />
+    </ItemGroup>
+    <WriteLinesToFile File="$(_HostAssetList)" Lines="[;@(_HostAssetLine, ',%0A');]" Overwrite="true" WriteOnlyWhenDifferent="true" />
+    <ItemGroup>
+      <Content Include="$(_HostAssetList)" Link="wwwroot\host-assets.json" CopyToOutputDirectory="PreserveNewest" />
+      <FileWrites Include="$(_HostAssetList)" />
+    </ItemGroup>
+  </Target>
+
+  <ItemGroup>
+    <!-- The page itself is shared with apps/OpenIGI.Web: one design, two runtimes. Only main.js is this
+         app's own (it boots exports.ProjectIGI.Web.Program); the rest are linked, not copied, so the page
+         never forks. Not linked: discord-sdk.js (no Discord Activity here), rtc.js and identity.js (no
+         rooms here), install.sh (the install command fetches it from openigi.com, not from the site). -->
+    <Content Include="..\OpenIGI.Web\wwwroot\index.html" Link="wwwroot\index.html" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\OpenIGI.Web\wwwroot\game-files.js" Link="wwwroot\game-files.js" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\OpenIGI.Web\wwwroot\user-files.js" Link="wwwroot\user-files.js" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\OpenIGI.Web\wwwroot\landing-audio.js" Link="wwwroot\landing-audio.js" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\OpenIGI.Web\wwwroot\sw.js" Link="wwwroot\sw.js" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\OpenIGI.Web\wwwroot\manifest.webmanifest" Link="wwwroot\manifest.webmanifest" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\OpenIGI.Web\wwwroot\icons\**\*" Link="wwwroot\icons\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\OpenIGI.Web\wwwroot\landing\**\*" Link="wwwroot\landing\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Interpreted rather than compiled ahead of time: the Mono AOT compiler crashes on the generated
+         WebGPU bindings (an sgen assertion in mono-aot-cross, 10.0.12), and they are P/Invoke stubs with
+         nothing to gain from compiling. The name is OpenIGI.Rendering.WebGpu.Native.dll, not
+         ProjectIGI.Rendering.WebGpu.Native.dll: Directory.Build.props rewrites ProjectIGI to OpenIGI in
+         every assembly name, so that is the file the publish holds (as in the Android app's
+         assets/managed). -->
+    <_AOT_InternalForceInterpretAssemblies Include="OpenIGI.Rendering.WebGpu.Native.dll" />
+  </ItemGroup>
+
+  <Import Project="..\..\src\Rendering\ProjectIGI.Rendering.WebGpu.Browser\WgpuBrowser.props" />
+  <Import Project="..\..\src\Platform\ProjectIGI.Platform.Web\WebPlatform.props" />
+  <Import Project="..\..\src\Audio\ProjectIGI.Audio.Web\WebAudio.props" />
+
+</Project>
