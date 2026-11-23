@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-  <meta name="theme-color" content="#000000">
+  <meta name="theme-color" content="#0a0f1c">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -15,12 +15,11 @@
   <meta name="color-scheme" content="dark">
   <meta name="description" content="I.G.I. 2: Covert Strike and Project I.G.I. in the browser, on a computer or a phone, with nothing to install.">
   <title>OpenIGI — I.G.I. 2: Covert Strike in the browser</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23000000'/%3E%3Ccircle cx='16' cy='16' r='8.5' fill='none' stroke='%2300ff41' stroke-width='2.2'/%3E%3Ccircle cx='16' cy='16' r='2.4' fill='%2300ff41'/%3E%3C/svg%3E">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230a0f1c'/%3E%3Cpath d='M10 21 L16 12 L22 21' fill='none' stroke='%23e8a33d' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
   <link rel="preload" href="landing/bg.webp" as="image" type="image/webp">
   <link rel="preload" href="landing/archivo.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="preload" href="landing/jetbrains-mono.woff2" as="font" type="font/woff2" crossorigin>
   <style>
-    /* Both variable fonts, served with the page (SIL Open Font License; see landing/OFL-*.txt). */
+    /* Archivo, served with the page (SIL Open Font License; see landing/OFL-Archivo.txt). */
     @font-face {
       font-family: "Archivo";
       src: url("landing/archivo.woff2") format("woff2");
@@ -28,30 +27,25 @@
       font-stretch: 62% 125%;
       font-display: swap;
     }
-    @font-face {
-      font-family: "JetBrains Mono";
-      src: url("landing/jetbrains-mono.woff2") format("woff2");
-      font-weight: 400 500;
-      font-display: swap;
-    }
 
-    /* Green terminal: black ground, bright green type, hairline green rules. Flat only:
-       no blur, no translucency, no glow, no shadows. */
+    /* Night operation: the deep blue of the compound photo, steel panels, moonlight type,
+       one lamp-amber accent. Flat only: no blur, no translucency, no glow, no shadows. */
     :root {
-      --bg: #000;
-      --panel: #010503;
-      --line: rgba(0, 255, 65, 0.45);
-      --line-soft: rgba(0, 255, 65, 0.18);
-      --text: #2bff4e;
-      --soft: #8dff9d;
-      --note: #c4ffc9;
-      --muted: #3fae55;
-      --faint: #237a33;
-      --accent: #00ff41;
-      --ok: #00ff41;
-      --error: #ff453a;
+      --bg: #0a0f1c;
+      --panel: #111a2a;
+      --panel-deep: #0d1524;
+      --line: #2a3850;
+      --line-soft: rgba(139, 155, 180, 0.22);
+      --text: #dfe7f2;
+      --soft: #aab8cc;
+      --note: #c3cede;
+      --muted: #7d8ea8;
+      --faint: #55677f;
+      --accent: #e8a33d;
+      --accent-hover: #f2b45c;
+      --accent-ink: #171204;
+      --error: #ff6b5e;
       --sans: "Archivo", system-ui, sans-serif;
-      --mono: "JetBrains Mono", ui-monospace, Consolas, monospace;
     }
 
     * { box-sizing: border-box; }
@@ -63,7 +57,7 @@
     #view { display: block; width: 100%; height: 100%; outline: none; background: #000; touch-action: none; }
     #view[hidden] { display: none; }
 
-    /* The terminal page: one wide column, black, green hairlines. */
+    /* The landing page: one wide column on the night-blue ground. */
     #landing {
       position: fixed;
       inset: 0;
@@ -83,9 +77,9 @@
       padding: clamp(14px, 2vw, 28px) clamp(16px, 2.5vw, 32px);
     }
 
-    .mono { font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.12em; text-transform: uppercase; }
+    .kicker { font-size: 12px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; }
 
-    /* Top bar: wordmark, the green-outlined nav buttons, sound, links, WebGPU dot. No top border. */
+    /* Masthead: wordmark and the page's own controls only. No navigation links. */
     header {
       display: flex;
       justify-content: space-between;
@@ -94,153 +88,84 @@
       gap: 12px 20px;
       padding-bottom: 14px;
     }
-    header .name { font-family: var(--mono); font-weight: 500; font-size: 15px; letter-spacing: 0.1em; color: var(--text); white-space: nowrap; }
-    header .name .tag { color: var(--faint); font-weight: 400; }
+    header .name { font-weight: 700; font-size: 15px; letter-spacing: 0.08em; color: var(--text); white-space: nowrap; }
+    header .name .tag { color: var(--faint); font-weight: 500; }
     .header-right { display: flex; align-items: center; gap: 14px; min-width: 0; margin-left: auto; }
-    .gpu { display: flex; align-items: center; gap: 8px; color: var(--muted); font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.12em; text-transform: uppercase; }
+    .gpu { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 11.5px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; }
     .gpu::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--faint); }
-    .gpu[data-state="ok"]::before { background: var(--ok); }
+    .gpu[data-state="ok"]::before { background: var(--accent); }
     .gpu[data-state="no"]::before { background: var(--error); }
     .social { display: inline-flex; width: 18px; height: 18px; color: var(--muted); }
     .social:hover { color: var(--text); }
     .social svg { width: 100%; height: 100%; }
 
-    /* The nav: one joined row of green-outlined buttons, like the reference's top bar. */
-    .topnav { display: flex; flex-wrap: wrap; }
-    .topnav button {
-      appearance: none;
-      padding: 9px 18px;
-      margin-left: -1px;
-      border: 1px solid var(--line);
-      background: transparent;
-      color: var(--text);
-      font-family: var(--mono);
-      font-size: 13px;
-      letter-spacing: 0.08em;
-      cursor: pointer;
-    }
-    .topnav button:first-child { margin-left: 0; }
-    .topnav button:hover { background: rgba(0, 255, 65, 0.14); }
-    .topnav button:focus-visible { outline: 2px solid var(--text); outline-offset: 1px; }
-
-    /* Sound: a plain mono toggle in the nav row, never a floating player. */
+    /* Sound: a small outlined toggle in the masthead, never a floating player. */
     .sound-toggle {
       appearance: none;
       padding: 9px 12px;
       border: 1px solid var(--line);
       background: transparent;
       color: var(--muted);
-      font-family: var(--mono);
+      font-family: var(--sans);
       font-size: 11px;
+      font-weight: 600;
       letter-spacing: 0.12em;
       cursor: pointer;
       white-space: nowrap;
     }
     .sound-toggle:hover { color: var(--text); }
-    .sound-toggle:focus-visible { outline: 2px solid var(--text); outline-offset: 1px; }
-    .sound-toggle[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #000; }
+    .sound-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+    .sound-toggle[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 
     .content { display: flex; flex-direction: column; }
 
-    /* Hero: the menu on the left, the scoped recon photo on the right. */
-    .hero-grid {
-      display: grid;
-      grid-template-columns: minmax(300px, 400px) 1fr;
-      gap: clamp(24px, 4vw, 64px);
-      align-items: start;
-      padding: clamp(20px, 3vw, 36px) 0 clamp(24px, 3vw, 36px);
+    /* Cover: the repo's own night-compound photo, shown plain, with the title and brief
+       over its darkened foot. Nothing drawn on top of the photo but the shade. */
+    .cover { position: relative; margin-top: 6px; }
+    .cover-media { position: relative; overflow: hidden; background: var(--panel-deep); }
+    .cover-media img {
+      display: block;
+      width: 100%;
+      aspect-ratio: 2 / 1;
+      object-fit: cover;
+      object-position: center 30%;
     }
-    .hero-left { display: flex; flex-direction: column; gap: 0; min-width: 0; }
+    .cover-shade {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background: linear-gradient(180deg, rgba(10, 15, 28, 0) 42%, rgba(10, 15, 28, 0.55) 76%, rgba(10, 15, 28, 0.9) 100%);
+    }
+    .cover-caption {
+      position: absolute;
+      right: 16px;
+      bottom: 12px;
+      color: var(--soft);
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      pointer-events: none;
+    }
+    .cover-text {
+      position: absolute;
+      left: clamp(18px, 3vw, 36px);
+      right: clamp(18px, 3vw, 36px);
+      bottom: clamp(18px, 3vw, 32px);
+      max-width: 640px;
+    }
+    .title-rule { display: block; width: 48px; height: 3px; background: var(--accent); margin-bottom: 16px; }
     h1 {
       margin: 0;
-      font-size: clamp(44px, 5.6vw, 76px);
-      line-height: 0.92;
+      font-size: clamp(40px, 5.6vw, 72px);
+      line-height: 0.95;
       font-weight: 800;
       font-stretch: 72%;
-      font-style: italic;
       letter-spacing: -0.01em;
-      color: var(--accent);
+      color: #f4f7fb;
       text-wrap: balance;
     }
-    .lead { margin: 18px 0 0; max-width: 420px; font-size: 15px; line-height: 1.55; color: var(--soft); text-wrap: pretty; }
-
-    /* The left menu: green type, the chosen row a solid green block with a ">" marker. */
-    .side-menu {
-      display: flex;
-      flex-direction: column;
-      align-items: flex-start;
-      gap: 2px;
-      margin-top: 30px;
-    }
-    .menu-item {
-      appearance: none;
-      display: block;
-      padding: 8px 14px 8px 10px;
-      border: none;
-      background: transparent;
-      color: var(--text);
-      font-family: var(--mono);
-      font-size: 19px;
-      letter-spacing: 0.02em;
-      text-align: left;
-      cursor: pointer;
-    }
-    .menu-item .marker { visibility: hidden; margin-right: 10px; }
-    .menu-item:hover { color: #fff; }
-    .menu-item.active { background: var(--accent); color: #000; }
-    .menu-item.active .marker { visibility: visible; }
-    .menu-item:focus-visible { outline: 2px solid var(--text); outline-offset: 1px; }
-    .menu-hint { margin: 26px 0 0; padding-left: 10px; color: var(--muted); font-family: var(--mono); font-size: 12px; letter-spacing: 0.1em; }
-
-    /* The hero photo: the repo's own night-compound shot, with a CSS scope/HUD treatment only --
-       green wash, grid, crosshair, scope ring, red laser dot and line, corner readouts. No new art. */
-    .hero { margin: 0; min-width: 0; }
-    .hero-media { position: relative; border: 1px solid var(--line); overflow: hidden; background: #000; }
-    .hero-media img { display: block; width: 100%; height: auto; }
-    .hero-media .layer { position: absolute; inset: 0; pointer-events: none; }
-    .hero-tint { background: rgba(0, 255, 65, 0.08); }
-    .hero-vignette { background: radial-gradient(ellipse at center, transparent 52%, rgba(0, 0, 0, 0.6) 100%); }
-    .hero-grid-lines {
-      background:
-        repeating-linear-gradient(90deg, rgba(0, 255, 65, 0.09) 0 1px, transparent 1px 56px),
-        repeating-linear-gradient(0deg, rgba(0, 255, 65, 0.09) 0 1px, transparent 1px 56px);
-    }
-    .hero-cross-x { position: absolute; left: 0; right: 0; top: 50%; height: 1px; background: rgba(0, 255, 65, 0.35); pointer-events: none; }
-    .hero-cross-y { position: absolute; top: 0; bottom: 0; left: 50%; width: 1px; background: rgba(0, 255, 65, 0.35); pointer-events: none; }
-    .hero-scope {
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      height: 94%;
-      aspect-ratio: 1;
-      transform: translate(-50%, -50%);
-      border: 1px solid rgba(0, 255, 65, 0.55);
-      border-radius: 50%;
-      pointer-events: none;
-    }
-    .laser-line { position: absolute; left: 68%; right: 0; top: 42%; height: 1px; background: rgba(255, 32, 32, 0.65); pointer-events: none; }
-    .laser-dot { position: absolute; left: 68%; top: 42%; width: 10px; height: 10px; margin: -5px 0 0 -5px; border-radius: 50%; background: #ff2020; pointer-events: none; }
-    .hud {
-      position: absolute;
-      font-family: var(--mono);
-      font-size: 10.5px;
-      letter-spacing: 0.12em;
-      color: var(--text);
-      pointer-events: none;
-    }
-    .hud-tl { top: 10px; left: 12px; }
-    .hud-tr { top: 10px; right: 12px; }
-    .hud-bl { bottom: 26px; left: 12px; }
-    .hero-ticks {
-      position: absolute;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      height: 12px;
-      background: repeating-linear-gradient(90deg, rgba(0, 255, 65, 0.55) 0 1px, transparent 1px 14px);
-      pointer-events: none;
-    }
-    .hero figcaption { margin-top: 8px; color: var(--faint); }
+    .lead { margin: 16px 0 0; max-width: 560px; font-size: 15px; line-height: 1.55; color: var(--note); text-wrap: pretty; }
 
     /* The two ways to play, side by side and of equal weight; one above the other on a narrow screen. */
     .paths {
@@ -248,7 +173,6 @@
       grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));
       gap: 16px;
       padding: 28px 0;
-      border-top: 1px solid var(--line-soft);
     }
     .path {
       display: flex;
@@ -260,14 +184,14 @@
     }
     .path-head { display: flex; flex-direction: column; gap: 6px; }
     .path-head .kicker { color: var(--accent); }
-    .path-head .platforms { color: var(--faint); font-size: 10.5px; }
+    .path-head .platforms { color: var(--faint); font-size: 11px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; }
     h2 { margin: 0; font-size: 30px; line-height: 1.05; font-weight: 700; font-stretch: 85%; color: var(--text); }
     .points { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; color: var(--note); font-size: 14.5px; line-height: 1.5; }
     .points li { position: relative; padding-left: 18px; }
     .points li::before { content: ""; position: absolute; left: 0; top: 0.62em; width: 8px; height: 1px; background: var(--muted); }
     .path .action { margin-top: auto; }
 
-    /* Which game the browser card plays: two halves of one green outline, the chosen one filled. */
+    /* Which game the browser card plays: two halves of one steel outline, the chosen one amber. */
     .games { display: inline-flex; align-self: flex-start; padding: 0; border: 1px solid var(--line); }
     .games button {
       appearance: none;
@@ -279,8 +203,8 @@
       cursor: pointer;
     }
     .games button:hover { color: var(--text); }
-    .games button[aria-pressed="true"] { background: var(--accent); color: #000; }
-    .games button:focus-visible { outline: 2px solid var(--text); outline-offset: 1px; }
+    .games button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
+    .games button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
     .games button:disabled { cursor: default; }
 
     .action { display: flex; flex-direction: column; gap: 12px; align-items: flex-start; }
@@ -294,16 +218,16 @@
       padding: 15px 26px;
       border: none;
       background: var(--accent);
-      color: #000;
+      color: var(--accent-ink);
       font: 600 16px/1.2 var(--sans);
       cursor: pointer;
     }
-    .play:hover { background: #5cff7d; }
+    .play:hover { background: var(--accent-hover); }
     .play:focus-visible { outline: 2px solid var(--text); outline-offset: 3px; }
-    .play:disabled { background: rgba(0, 255, 65, 0.25); color: rgba(0, 0, 0, 0.7); cursor: default; }
+    .play:disabled { background: rgba(232, 163, 61, 0.25); color: rgba(23, 18, 4, 0.7); cursor: default; }
 
-    .status { font-family: var(--mono); font-size: 12px; line-height: 1.6; color: var(--faint); }
-    .status[data-tone="ok"] { color: var(--ok); }
+    .status { font-size: 12.5px; line-height: 1.6; color: var(--faint); }
+    .status[data-tone="ok"] { color: var(--accent); }
     .status[data-tone="error"] { color: var(--error); }
 
     .change {
@@ -312,7 +236,7 @@
       border: none;
       background: none;
       color: var(--muted);
-      font: 12px/1.6 var(--mono);
+      font: 12px/1.6 var(--sans);
       text-decoration: underline;
       text-underline-offset: 3px;
       cursor: pointer;
@@ -323,18 +247,18 @@
 
     .loading { display: flex; flex-direction: column; gap: 12px; width: min(360px, 100%); }
     .loading[hidden] { display: none; }
-    .progress { height: 2px; background: rgba(0, 255, 65, 0.15); overflow: hidden; }
+    .progress { height: 2px; background: rgba(139, 155, 180, 0.2); overflow: hidden; }
     .progress > div { height: 100%; width: 0; background: var(--accent); transition: width 0.2s linear; }
     .progress.indeterminate > div { width: 25%; animation: sweep 1.4s ease-in-out infinite; }
     @keyframes sweep { from { transform: translateX(-100%); } to { transform: translateX(400%); } }
     .loading .status { display: flex; justify-content: space-between; gap: 12px; font-variant-numeric: tabular-nums; }
 
-    .install { display: flex; flex-direction: column; gap: 6px; width: 100%; color: var(--muted); font: 11.5px/1.6 var(--mono); }
+    .install { display: flex; flex-direction: column; gap: 6px; width: 100%; color: var(--muted); font: 11.5px/1.6 var(--sans); }
     .install > .label { display: flex; justify-content: space-between; align-items: center; gap: 8px; color: var(--note); }
     .command {
       padding: 8px 10px;
       border: 1px solid var(--line-soft);
-      background: #000;
+      background: var(--panel-deep);
       color: var(--text);
       font: inherit;
       user-select: all;
@@ -351,20 +275,24 @@
     }
     .install button:hover { color: var(--text); }
 
-    /* Terminal sections: a marker, a rule, and the files. */
+    /* Sections: an amber bar, a heading, and the files. */
     .dossier { padding: 28px 0; border-top: 1px solid var(--line-soft); }
     .section-head {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
       margin: 0 0 18px;
       font-size: 13px;
+      font-weight: 700;
       letter-spacing: 0.14em;
       color: var(--text);
     }
-    .section-head .marker { color: var(--accent); }
+    .section-head .rule { width: 28px; height: 2px; background: var(--accent); }
     .section-head .count { color: var(--faint); }
     .dossier .intro-line { margin: 0 0 18px; max-width: 640px; color: var(--soft); font-size: 14.5px; line-height: 1.55; }
 
     .campaigns { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 24px 32px; }
-    .campaign h3 { margin: 0 0 10px; color: var(--accent); font-family: var(--mono); font-size: 11.5px; font-weight: 500; letter-spacing: 0.12em; text-transform: uppercase; }
+    .campaign h3 { margin: 0 0 10px; color: var(--accent); font-size: 11.5px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; }
     .campaign h3 span { color: var(--muted); }
     .missions { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; }
     .missions li {
@@ -372,16 +300,16 @@
       gap: 14px;
       align-items: baseline;
       padding: 7px 0;
-      border-bottom: 1px solid rgba(0, 255, 65, 0.08);
+      border-bottom: 1px solid rgba(139, 155, 180, 0.12);
       font-size: 14.5px;
       line-height: 1.4;
     }
     .missions li:last-child { border-bottom: none; }
-    .missions .num { flex: none; width: 24px; color: var(--faint); font-family: var(--mono); font-size: 12px; }
+    .missions .num { flex: none; width: 24px; color: var(--accent); font-size: 12px; font-weight: 600; }
     .missions .mname { color: var(--note); }
 
     .manual { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: 24px 32px; }
-    .manual h3 { margin: 0 0 8px; color: var(--accent); font-family: var(--mono); font-size: 11.5px; font-weight: 500; letter-spacing: 0.12em; text-transform: uppercase; }
+    .manual h3 { margin: 0 0 8px; color: var(--accent); font-size: 11.5px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; }
     .manual p { margin: 0; color: var(--soft); font-size: 14.5px; line-height: 1.55; }
 
     /* Intel: one file per row, opened in place. */
@@ -394,19 +322,19 @@
       padding: 14px 2px;
       cursor: pointer;
       list-style: none;
-      font-family: var(--mono);
-      font-size: 13px;
-      letter-spacing: 0.08em;
+      font-size: 14px;
+      font-weight: 600;
+      letter-spacing: 0.04em;
       color: var(--text);
     }
     .intel summary::-webkit-details-marker { display: none; }
-    .intel summary::before { content: "+"; color: var(--accent); }
+    .intel summary::before { content: "+"; color: var(--accent); font-weight: 700; }
     .intel details[open] summary::before { content: "–"; }
     .intel summary:hover { color: #fff; }
-    .intel summary .file-note { margin-left: auto; color: var(--faint); font-size: 11px; letter-spacing: 0.12em; }
+    .intel summary .file-note { margin-left: auto; color: var(--faint); font-size: 11px; font-weight: 600; letter-spacing: 0.12em; }
     .intel .file-body { margin: 0; padding: 0 2px 18px 26px; max-width: 640px; color: var(--soft); font-size: 14.5px; line-height: 1.6; }
 
-    /* The community row: two slim flat cards, the server's live count and faces on Discord's. */
+    /* The community row: two slim cards, the server's live count and faces on Discord's. */
     .community {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));
@@ -430,14 +358,14 @@
     .link-body { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; }
     .link-title { font-weight: 600; font-size: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .link-sub { display: flex; flex-wrap: wrap; gap: 4px 10px; color: var(--muted); font-size: 13px; line-height: 1.4; }
-    .live { display: inline-flex; align-items: center; gap: 6px; color: var(--ok); font: 11.5px/1.4 var(--mono); }
-    .live::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--ok); }
+    .live { display: inline-flex; align-items: center; gap: 6px; color: var(--accent); font-size: 11.5px; font-weight: 600; }
+    .live::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
     .live[hidden], #github-stars[hidden] { display: none; }
-    #github-stars { color: var(--note); font: 11.5px/1.4 var(--mono); }
+    #github-stars { color: var(--note); font-size: 11.5px; font-weight: 600; }
     .avatars { display: flex; flex: none; }
-    .avatars img { width: 26px; height: 26px; border-radius: 50%; border: 2px solid #000; margin-left: -8px; background: #111; }
+    .avatars img { width: 26px; height: 26px; border-radius: 50%; border: 2px solid var(--bg); margin-left: -8px; background: #111; }
     .avatars img:first-child { margin-left: 0; }
-    .link-go { flex: none; color: var(--muted); font: 12px/1 var(--mono); letter-spacing: 0.06em; }
+    .link-go { flex: none; color: var(--muted); font-size: 12px; letter-spacing: 0.06em; }
     .link-card:hover .link-go { color: var(--text); }
     @media (max-width: 480px) { .avatars { display: none; } }
 
@@ -449,13 +377,14 @@
       padding-top: 16px;
       border-top: 1px solid var(--line-soft);
       color: var(--faint);
-      font: 11px/1.6 var(--mono);
+      font: 11px/1.6 var(--sans);
     }
 
-    /* The hero stacks on a narrow screen: title and menu first, the photo below them. */
-    @media (max-width: 900px) {
-      .hero-grid { grid-template-columns: 1fr; }
-      .menu-item { font-size: 17px; }
+    /* On a narrow screen the cover text sits below the photo, on the page ground. */
+    @media (max-width: 700px) {
+      .cover-text { position: static; padding: 20px 0 0; }
+      .cover-media img { aspect-ratio: 16 / 10; }
+      .cover-caption { display: none; }
     }
 
     /* On a phone the browser's state is the dot alone: its words would push the header past the screen. */
@@ -476,13 +405,6 @@
     <div class="page">
       <header>
         <span class="name">OPENIGI <span class="tag">// IN THE BROWSER</span></span>
-        <nav class="topnav" aria-label="Sections">
-          <button type="button" data-target="#play-section" data-focus="play">Play</button>
-          <button type="button" data-target="#desktop-section">Download</button>
-          <button type="button" data-target="#missions-section">Missions</button>
-          <button type="button" data-target="#manual-section">Guides</button>
-          <button type="button" data-target="#intel-section">Info</button>
-        </nav>
         <span class="header-right">
           <button type="button" class="sound-toggle" id="sound-toggle" aria-pressed="true">SOUND ON</button>
           <a class="social" href="https://github.com/OpenIGI/OpenIGI" target="_blank" rel="noopener" aria-label="OpenIGI on GitHub"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 .5a11.5 11.5 0 0 0-3.6 22.4c.6.1.8-.3.8-.6v-2c-3.2.7-3.9-1.5-3.9-1.5-.5-1.3-1.3-1.7-1.3-1.7-1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.8 1.3 3.4 1 .1-.8.4-1.3.8-1.6-2.6-.3-5.3-1.3-5.3-5.7 0-1.3.5-2.3 1.2-3.1-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.2 1.2a11 11 0 0 1 5.8 0c2.2-1.5 3.2-1.2 3.2-1.2.6 1.6.2 2.8.1 3.1.8.8 1.2 1.8 1.2 3.1 0 4.4-2.7 5.4-5.3 5.7.4.4.8 1.1.8 2.2v3.2c0 .3.2.7.8.6A11.5 11.5 0 0 0 12 .5Z"/></svg></a>
@@ -492,46 +414,26 @@
       </header>
 
       <div class="content">
-        <section class="hero-grid">
-          <div class="hero-left">
+        <section class="cover">
+          <div class="cover-media">
+            <img src="landing/bg.webp" alt="A compound at night, seen from the desktop build" fetchpriority="high">
+            <div class="cover-shade" aria-hidden="true"></div>
+            <span class="cover-caption" aria-hidden="true">A compound at night — from the desktop build</span>
+          </div>
+          <div class="cover-text">
+            <span class="title-rule" aria-hidden="true"></span>
             <h1 id="game-name">Project I.G.I.</h1>
             <p class="lead" id="game-brief">Fourteen missions, one operative. Get Priboi out, steal Ekk's plans, find the bomb — the original Project I.G.I., in the browser, with your own copy of the game.</p>
-            <nav class="side-menu" id="side-menu" aria-label="Play">
-              <button type="button" class="menu-item active" data-target="#play-section" data-focus="play"><span class="marker">&gt;</span>Play on PC</button>
-              <button type="button" class="menu-item" data-target="#phone-block"><span class="marker">&gt;</span>Play on Mobile</button>
-              <button type="button" class="menu-item" data-target="#desktop-section"><span class="marker">&gt;</span>Download I.G.I. 2</button>
-              <button type="button" class="menu-item" data-target="#missions-section"><span class="marker">&gt;</span>Mission Files</button>
-              <button type="button" class="menu-item" data-target="#intel-section"><span class="marker">&gt;</span>Intel</button>
-            </nav>
-            <p class="menu-hint">Select and press Enter</p>
           </div>
-          <figure class="hero">
-            <div class="hero-media">
-              <img src="landing/bg.webp" alt="A compound at night, seen from the desktop build" fetchpriority="high">
-              <div class="layer hero-tint" aria-hidden="true"></div>
-              <div class="layer hero-vignette" aria-hidden="true"></div>
-              <div class="layer hero-grid-lines" aria-hidden="true"></div>
-              <div class="hero-cross-x" aria-hidden="true"></div>
-              <div class="hero-cross-y" aria-hidden="true"></div>
-              <div class="hero-scope" aria-hidden="true"></div>
-              <div class="laser-line" aria-hidden="true"></div>
-              <div class="laser-dot" aria-hidden="true"></div>
-              <span class="hud hud-tl" aria-hidden="true">FIG 01 — COMPOUND AT NIGHT</span>
-              <span class="hud hud-tr" aria-hidden="true">×4 SCOPE</span>
-              <span class="hud hud-bl" aria-hidden="true">CAM 01</span>
-              <div class="hero-ticks" aria-hidden="true"></div>
-            </div>
-            <figcaption class="mono">RECON PHOTO FROM THE DESKTOP BUILD.</figcaption>
-          </figure>
         </section>
 
         <div class="paths">
           <!-- In the browser. -->
           <section class="path" id="play-section" aria-labelledby="browser-title">
             <div class="path-head">
-              <span class="mono kicker">PLAY NOW</span>
+              <span class="kicker">PLAY NOW</span>
               <h2 id="browser-title">In the browser</h2>
-              <span class="mono platforms">Chrome, Edge, Safari · computers and phones</span>
+              <span class="platforms">Chrome, Edge, Safari · computers and phones</span>
             </div>
             <div class="games" id="games" role="group" aria-label="Game">
               <button type="button" data-game="igi1" aria-pressed="true">Project I.G.I.</button>
@@ -565,9 +467,9 @@
           <!-- The desktop build. -->
           <section class="path" id="desktop-section" aria-labelledby="desktop-title">
             <div class="path-head">
-              <span class="mono kicker">FULL REMASTER</span>
+              <span class="kicker">FULL REMASTER</span>
               <h2 id="desktop-title">Desktop launcher</h2>
-              <span class="mono platforms">Windows · macOS · Linux</span>
+              <span class="platforms">Windows · macOS · Linux</span>
             </div>
             <ul class="points">
               <li>Every graphics preset, up to ray-traced lighting and upscaling on supported cards.</li>
@@ -592,14 +494,14 @@
 
         <!-- The missions, as the games list them. Names only: the briefings stay in the game. -->
         <section class="dossier" id="missions-section" aria-labelledby="missions-head">
-          <h2 class="mono section-head" id="missions-head"><span class="marker">&gt;</span> MISSION FILES <span class="count" id="mission-count">[ALL 14]</span></h2>
+          <h2 class="section-head" id="missions-head"><span class="rule" aria-hidden="true"></span><span>MISSION FILES <span class="count" id="mission-count">[ALL 14]</span></span></h2>
           <p class="intro-line" id="missions-intro">Fourteen missions across Eastern Europe, from a coastline trainyard to a nuclear base.</p>
           <div class="campaigns" id="mission-list"></div>
         </section>
 
         <!-- How to play, on a phone, and what it needs. -->
         <section class="dossier" id="manual-section" aria-labelledby="manual-head">
-          <h2 class="mono section-head" id="manual-head"><span class="marker">&gt;</span> FIELD MANUAL</h2>
+          <h2 class="section-head" id="manual-head"><span class="rule" aria-hidden="true"></span><span>FIELD MANUAL</span></h2>
           <div class="manual">
             <div>
               <h3>HOW TO PLAY</h3>
@@ -618,7 +520,7 @@
 
         <!-- The files, opened in place. -->
         <section class="dossier" id="intel-section" aria-labelledby="intel-head">
-          <h2 class="mono section-head" id="intel-head"><span class="marker">&gt;</span> INTEL</h2>
+          <h2 class="section-head" id="intel-head"><span class="rule" aria-hidden="true"></span><span>INTEL</span></h2>
           <div class="intel" id="intel-list"></div>
         </section>
 
