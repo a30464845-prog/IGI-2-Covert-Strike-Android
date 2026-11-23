@@ -52,6 +52,16 @@ public sealed partial class Igi2Gameplay : ITitleGameplay
         new((ulong)Igi2PlayerAction.Crouch, new("Title_igi2_CrouchAlt", Game.Config.InputBindingKeyNames.KeyboardDevice, "KEY_RIGHT_CTRL"), "Crouch (alternate)"),
         new((ulong)Igi2PlayerAction.ToggleWalkRun, new("Title_igi2_ToggleWalkRun", Game.Config.InputBindingKeyNames.KeyboardDevice, "KEY_CAPITAL"), "Toggle walk/run", PlayerAction.ToggleWalkRun),
         new((ulong)Igi2PlayerAction.ToggleWalkRun, new("Title_igi2_ToggleWalkRunAlt", Game.Config.InputBindingKeyNames.KeyboardDevice, "KEY_END"), "Toggle walk/run (alternate)"),
+        // Reload on R: the shared default is Enter, a key no hand on WASD reaches. The title owns the
+        // action now, so Enter stays as its alternate rather than a second binding for it.
+        new((ulong)Igi2PlayerAction.Reload, new("Title_igi2_Reload", Game.Config.InputBindingKeyNames.KeyboardDevice, "KEY_R"), "Reload", PlayerAction.Reload),
+        new((ulong)Igi2PlayerAction.Reload, new("Title_igi2_ReloadAlt", Game.Config.InputBindingKeyNames.KeyboardDevice, "KEY_RETURN"), "Reload (alternate)"),
+        // The thermal sight had no key at all: the mobile build reaches it from its touch button, and a
+        // keyboard has nothing until this.
+        new((ulong)Igi2PlayerAction.Thermal, new("Title_igi2_Thermal", Game.Config.InputBindingKeyNames.KeyboardDevice, "KEY_T"), "Thermal sight"),
+        // The computer's objectives screen. Retail's key is O, but O is the previous weapon in the retail defaults and in
+        // profiles that never moved it, so the port's own default is U, which binds nothing.
+        new((ulong)Igi2PlayerAction.ComputerObjectives, new("Title_igi2_ComputerObjectives", Game.Config.InputBindingKeyNames.KeyboardDevice, "KEY_U"), "Computer objectives"),
     ];
 
     /// <inheritdoc/>
