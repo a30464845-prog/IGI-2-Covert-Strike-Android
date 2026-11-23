@@ -35,6 +35,7 @@
     <Project Path="src/Platform/ProjectIGI.Input/ProjectIGI.Input.csproj" />
     <Project Path="src/Platform/ProjectIGI.Platform.Desktop/ProjectIGI.Platform.Desktop.csproj" />
     <Project Path="src/Platform/ProjectIGI.Platform/ProjectIGI.Platform.csproj" />
+    <Project Path="src/Platform/ProjectIGI.Platform.Web/ProjectIGI.Platform.Web.csproj" />
   </Folder>
   <Folder Name="/src/Rendering/">
     <Project Path="src/Rendering/ProjectIGI.Rendering.Pipeline/ProjectIGI.Rendering.Pipeline.csproj" />

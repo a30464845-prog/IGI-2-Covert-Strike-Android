@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The browser's window: a canvas, the page's input events, pointer lock and fullscreen. The C#
+       half reads the page through IBrowserPage, so everything but the JavaScript interop runs (and is
+       tested) off the browser too. A port of OpenIGI.Platform.Web onto the fork's tree: the window
+       answers the fork's IGameWindow, so there is no PixelDensity/SafeInsets and no SetMotionSensors/
+       SetTextEntry — gyro arrives through TakeGyroMotion, as on Android, and the page's text entry is
+       driven by the app polling the host. The Rendering reference is for ReconstructionCVars, which
+       the RenderScaleMode setter writes exactly as AndroidGameWindow does. -->
+  <PropertyGroup>
+    <!-- The JavaScript interop's generated marshalling is unsafe code. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\Core\ProjectIGI.Core\ProjectIGI.Core.csproj" />
+    <ProjectReference Include="..\ProjectIGI.Platform\ProjectIGI.Platform.csproj" />
+    <ProjectReference Include="..\ProjectIGI.Input\ProjectIGI.Input.csproj" />
+    <ProjectReference Include="..\..\Rendering\ProjectIGI.Rendering\ProjectIGI.Rendering.csproj" />
+  </ItemGroup>
+
+</Project>
