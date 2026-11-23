@@ -769,6 +769,37 @@ $('install-copy').addEventListener('click', async event => {
   setTimeout(() => { button.textContent = 'Copy'; }, 1500);
 });
 
+// --- The side menu: arrow keys move, Enter opens -------------------------------------------------------
+//
+// The menu on the landing page works like the reference's: the arrow keys move the green block, Enter
+// opens the section it names. A click does the same as Enter. The top nav shares the targets, and marks
+// the matching menu row when one names the same section.
+
+const sideMenu = $('side-menu');
+const menuItems = sideMenu ? [...sideMenu.querySelectorAll('.menu-item')] : [];
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+function goTo(control) {
+  const match = menuItems.find(item => item.dataset.target === control.dataset.target);
+  if (match) for (const other of menuItems) other.classList.toggle('active', other === match);
+  document.querySelector(control.dataset.target)?.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' });
+  if (control.dataset.focus) document.getElementById(control.dataset.focus)?.focus({ preventScroll: true });
+}
+if (sideMenu) {
+  for (const item of menuItems) item.addEventListener('click', () => goTo(item));
+  sideMenu.addEventListener('keydown', event => {
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+    const at = menuItems.indexOf(document.activeElement);
+    if (at === -1) return;
+    event.preventDefault();
+    const next = menuItems[(at + (event.key === 'ArrowDown' ? 1 : -1) + menuItems.length) % menuItems.length];
+    for (const other of menuItems) other.classList.toggle('active', other === next);
+    next.focus();
+  });
+}
+for (const button of document.querySelectorAll('.topnav button[data-target]')) {
+  button.addEventListener('click', () => goTo(button));
+}
+
 // --- The community -------------------------------------------------------------------------------------
 //
 // The Discord server's own live numbers -- its name, who is online, a few faces, its invite -- read from the
