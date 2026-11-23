@@ -7,6 +7,7 @@
   <Folder Name="/src/Audio/">
     <Project Path="src/Audio/ProjectIGI.Audio.OpenAL/ProjectIGI.Audio.OpenAL.csproj" />
     <Project Path="src/Audio/ProjectIGI.Audio/ProjectIGI.Audio.csproj" />
+    <Project Path="src/Audio/ProjectIGI.Audio.Web/ProjectIGI.Audio.Web.csproj" />
   </Folder>
   <Folder Name="/src/Core/">
     <Project Path="src/Core/ProjectIGI.Core/ProjectIGI.Core.csproj" />
@@ -51,8 +52,5 @@
     <Project Path="src/UI/ProjectIGI.UI.Kit/ProjectIGI.UI.Kit.csproj" />
     <Project Path="src/UI/ProjectIGI.UI.Rhi/ProjectIGI.UI.Rhi.csproj" />
     <Project Path="src/UI/ProjectIGI.UI/ProjectIGI.UI.csproj" />
-  </Folder>
-  <Folder Name="/tests/">
-    <Project Path="tests/ProjectIGI.Platform.Web.Tests/ProjectIGI.Platform.Web.Tests.csproj" />
   </Folder>
 </Solution>
