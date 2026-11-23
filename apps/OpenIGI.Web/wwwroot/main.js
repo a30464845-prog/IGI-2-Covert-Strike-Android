@@ -14,6 +14,7 @@ import * as identity from './identity.js';
 import * as audio from './audio.js';
 import * as files from './game-files.js';
 import * as userFiles from './user-files.js';
+import * as landingAudio from './landing-audio.js';
 
 const GAME_ROOT = '/game';
 
@@ -86,6 +87,111 @@ if (SWITCHED) {
   history.replaceState(null, '', address.href);
 }
 
+// --- The dossier: what the page says about each game ---------------------------------------------------
+//
+// The mission names are the games' own (their mission lists, in campaign order). The words around
+// them are the page's, written for it — not the guide pages' copy, and the briefings stay in the game.
+
+const DOSSIER = {
+  igi1: {
+    brief: 'Fourteen missions, one operative. Get Priboi out, steal Ekk\u2019s plans, find the bomb — the original Project I.G.I., in the browser, with your own copy of the game.',
+    missionsIntro: 'Fourteen missions across Eastern Europe, from a coastline trainyard to a nuclear base.',
+    campaigns: [
+      { name: 'CAMPAIGN', note: 'ONE CAMPAIGN · 14 MISSIONS', missions: [
+        'Trainyard', 'SAM Base', 'Military Airbase', 'GOD', 'Radar Base', 'Get Priboi',
+        'Border Crossing', 'Re-supply', 'Missile Trainyard', 'Defend Priboi',
+        'Eagle\u2019s Nest I', 'Eagle\u2019s Nest II', 'Nuclear Infiltration', 'Finding the bomb',
+      ] },
+    ],
+    intel: [
+      { file: 'STORY.TXT', note: 'HOW IT UNFOLDS', body: 'Jones goes in alone. Break Josef Priboi out of an airbase, kidnap his brother Jach, cross the border, and storm Ekk\u2019s fortress to find a nuclear bomb before it goes off.' },
+      { file: 'CHARACTERS.TXT', note: 'WHO IS WHO', body: 'David Jones — the operative. Anya — his handler, on the radio. Josef Priboi — the man to rescue. Jach Priboi and Ekk — the opposition.' },
+    ],
+  },
+  igi2: {
+    brief: 'Nineteen missions in three campaigns. David Jones follows a stolen EMP chip from a Libyan mine through Russia to a launch pad in China — alone, and in the browser, with your own copy of the game.',
+    missionsIntro: 'Nineteen missions in three campaigns: the chip trail, Priboi, and the launch pad.',
+    campaigns: [
+      { name: 'CAMPAIGN 1', note: 'LIBYA · 7 MISSIONS', missions: [
+        'Infiltration', 'Deep in the Mines', 'The Weather Station', 'Bridge Across the Dnestr',
+        'Ambush', 'Production Facility', 'Border Crossing',
+      ] },
+      { name: 'CAMPAIGN 2', note: 'LIBYA AND RUSSIA · 6 MISSIONS', missions: [
+        'Libyan Rendezvous', 'Prison Escape', 'Priboi\u2019s Villa', 'The Airfield',
+        'Zaleb\u2019s Stronghold', 'Showdown at the Docks',
+      ] },
+      { name: 'CAMPAIGN 3', note: 'CHINA · 6 MISSIONS', missions: [
+        'Island Assault', 'Air-Strike', 'The Ancient Temple', 'Secret Weapons Lab',
+        'Mission Control', 'The Launch Pad',
+      ] },
+    ],
+    intel: [
+      { file: 'STORY.TXT', note: 'HOW IT UNFOLDS', body: 'A prototype EMP chip — a weapon that kills electronics across a battlefield — has gone missing. David Jones follows it from a mine in Libya through a prison, a villa and an airfield in Russia, to an island launch site in China. He works alone; Anya runs him from the radio.' },
+      { file: 'CHARACTERS.TXT', note: 'WHO IS WHO', body: 'David Jones — the operative on the ground. Anya — his handler, on the radio. Josef Priboi — the arms dealer at the centre of it all. Robert Quest, Zaleb, Wu Xing — the men standing between Jones and the chip.' },
+    ],
+  },
+};
+
+/** The intel files both games share. */
+const INTEL_COMMON = [
+  { file: 'CONTROLS.TXT', note: 'KEYS AND TOUCH', body: 'Mouse to aim, WASD to move, on a computer. Twin sticks and touch buttons on a phone. Every binding can be changed in the game\u2019s own options.' },
+  { file: 'REQUIREMENTS.TXT', note: 'WHAT IT NEEDS', body: 'A browser with WebGPU — a current Chrome or Edge on a computer, Safari on an iPhone or iPad. Your own copy of the game, picked once in the browser. About 40 MB downloads on the first visit and is kept for the next.' },
+];
+
+/** The dossier for one game: its brief, its mission files, its intel. */
+function renderDossier(id) {
+  const dossier = DOSSIER[id];
+  $('game-brief').textContent = dossier.brief;
+  $('missions-intro').textContent = dossier.missionsIntro;
+  const total = dossier.campaigns.reduce((sum, campaign) => sum + campaign.missions.length, 0);
+  $('mission-count').textContent = `[ALL ${total}]`;
+  const list = $('mission-list');
+  list.replaceChildren();
+  let number = 0;
+  for (const campaign of dossier.campaigns) {
+    const group = document.createElement('div');
+    group.className = 'campaign';
+    const head = document.createElement('h3');
+    head.textContent = campaign.name;
+    const note = document.createElement('span');
+    note.textContent = ` — ${campaign.note}`;
+    head.append(note);
+    group.append(head);
+    const missions = document.createElement('ol');
+    missions.className = 'missions';
+    for (const name of campaign.missions) {
+      number++;
+      const row = document.createElement('li');
+      const num = document.createElement('span');
+      num.className = 'num';
+      num.textContent = String(number).padStart(2, '0');
+      const label = document.createElement('span');
+      label.className = 'mname';
+      label.textContent = name;
+      row.append(num, label);
+      missions.append(row);
+    }
+    group.append(missions);
+    list.append(group);
+  }
+  const intel = $('intel-list');
+  intel.replaceChildren();
+  for (const entry of [...dossier.intel, ...INTEL_COMMON]) {
+    const file = document.createElement('details');
+    const head = document.createElement('summary');
+    head.textContent = entry.file;
+    const note = document.createElement('span');
+    note.className = 'file-note';
+    note.textContent = entry.note;
+    head.append(note);
+    const body = document.createElement('p');
+    body.className = 'file-body';
+    body.textContent = entry.body;
+    file.append(head, body);
+    intel.append(file);
+  }
+}
+
 /** Shows a game as the chosen one, and keeps the choice. */
 function showGame(id) {
   game = id;
@@ -96,7 +202,10 @@ function showGame(id) {
   } catch {
     // Not kept; chosen again next visit.
   }
+  renderDossier(id);
+  landingAudio.setGame(id, files.TITLES[id].name);
 }
+landingAudio.init({ toggle: $('sound-toggle'), line: $('audio-line'), landing });
 showGame(game);
 
 const hint = () => `The folder with ${files.TITLES[game].exe} in it${game === 'igi1' ? ', usually pc inside the installation' : ''}.`;
@@ -356,6 +465,15 @@ async function chooseSource() {
   if (folderMode) offerFolder();
   else offerHosted(hosted);
 
+  // The soundtrack, from the hosted files, while the person is still on the page: the
+  // hosted source is made here so the music can start before Play, and the game reuses its
+  // downloaded bundles from the cache when Play is pressed. Never throws.
+  const primeHostedAudio = () => {
+    if (folderMode) return;
+    files.fromHosted(hostedData()).then(source => landingAudio.setSource(source)).catch(() => {});
+  };
+  primeHostedAudio();
+
   // Inside a Discord Activity the voice channel came to play, and a game's switcher has just sent the page here
   // (?play): straight in with the site's files, no Play to press.
   if ((IN_DISCORD || SWITCHED) && !folderMode) {
@@ -384,6 +502,7 @@ async function chooseSource() {
         folderMode = ownChosen || hosted === null;
         if (folderMode) offerFolder();
         else offerHosted(hosted);
+        primeHostedAudio();
       } finally {
         busy = false;
         play.disabled = false;
@@ -430,6 +549,9 @@ async function chooseSource() {
             remembered = await files.rememberedFolder(game);
           }
           ready = picked;
+          // The folder is known while the person is still on the page: its soundtrack
+          // starts here, and the game plays from the same folder when Play is pressed.
+          landingAudio.setSource(picked);
           if (picked.handle) await files.rememberFolder(picked.title, picked.handle);
           offer('Play game', `Found ${files.TITLES[picked.title].name} in /${picked.name}. Ready.`, 'ok', true);
         }
@@ -488,10 +610,14 @@ function offerReload(label, status, tone) {
   play.disabled = false;
   play.onclick = () => location.reload();
   play.focus();
+  // A clean quit hands the page back with its soundtrack; a stop does not.
+  if (tone === 'neutral') landingAudio.resume();
 }
 
 async function start() {
   const source = await chooseSource();
+  // The soundtrack, out of the installation the game is about to play from.
+  landingAudio.setSource(source);
   // The game the files are, which the host is told; an explicit -title in ?args= stands.
   if (!args.includes('-title')) args.push('-title', source.title);
 
@@ -554,6 +680,8 @@ async function start() {
   landing.hidden = true;
   canvas.hidden = false;
   canvas.focus();
+  // The game's own sound takes over from the landing page's soundtrack here.
+  landingAudio.stop();
   game.Boot(args);
 
   // Frames stepped so far and the state of the sound, for anyone measuring from outside (an automated
