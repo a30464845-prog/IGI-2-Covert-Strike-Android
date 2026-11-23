@@ -7,7 +7,7 @@
 ### **Native Android Engine Port (`ARM64` · `.NET 10` · `Vulkan 1.1` · `OpenAL Soft`)**
 
 <p>
-  <a href="https://github.com/rayishere0/Project-IGI-2-Covert-Strike-Android/releases">
+  <a href="https://github.com/rayishere0/IGI-2-Covert-Strike-Android/releases">
     <img src="https://img.shields.io/badge/⬇️%20DOWNLOAD%20LATEST%20APK-GitHub%20Releases-00E676?style=for-the-badge&logo=android&logoColor=0B132B" alt="Download Latest Release APK" />
   </a>
 </p>
