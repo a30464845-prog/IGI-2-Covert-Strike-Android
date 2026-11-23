@@ -118,7 +118,7 @@ public sealed class Igi2StanceBindingTests
     {
         PlayerProfile profile = PlayerProfile.CreateDefault();
         TitleInputBindings.RestoreMissing(profile, new Igi2Gameplay().InputBindings);
-        Assert.Equal(PlayerAction.Crouch | PlayerAction.ToggleWalkRun, TitleInputBindings.ReplacedActions(new Igi2Gameplay().InputBindings));
+        Assert.Equal(PlayerAction.Crouch | PlayerAction.ToggleWalkRun | PlayerAction.Reload, TitleInputBindings.ReplacedActions(new Igi2Gameplay().InputBindings));
         Assert.Null(TitleInputBindings.Label("Crouch", new Igi2Gameplay().InputBindings));
         Assert.Equal("Crouch", TitleInputBindings.Label("Title_igi2_Crouch", new Igi2Gameplay().InputBindings));
         Assert.Null(TitleInputBindings.Label("Title_igi2_Crouch", []));
