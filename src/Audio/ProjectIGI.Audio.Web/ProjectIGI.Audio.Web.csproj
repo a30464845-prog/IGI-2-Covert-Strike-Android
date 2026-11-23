@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The browser's audio device: the Web Audio API, through the functions audio.js gives the runtime.
+       The C# half reads the page through IWebAudioPage, so everything but the JavaScript interop runs
+       (and is tested) off the browser too. A port of OpenIGI.Audio.Web onto the fork's tree: the device
+       answers the fork's IAudioDevice, so there is no OpenMicrophone — the fork has no IMicrophone /
+       LiveVoice, and the microphone methods are dropped from the device, the page interface and the
+       page. -->
+  <PropertyGroup>
+    <!-- The JavaScript interop's generated marshalling is unsafe code. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\Core\ProjectIGI.Core\ProjectIGI.Core.csproj" />
+    <ProjectReference Include="..\ProjectIGI.Audio\ProjectIGI.Audio.csproj" />
+  </ItemGroup>
+
+</Project>
