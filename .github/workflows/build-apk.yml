@@ -9,10 +9,11 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      # ─── 1. Code download (v1.5 = last working release) ───
+      # ─── 1. Code download (ORIGINAL repo se, v1.5 tag) ───
       - name: Checkout
         uses: actions/checkout@v5
         with:
+          repository: rayishere0/IGI-2-Covert-Strike-Android
           ref: improvements_bug_fixes_igi2
           submodules: recursive
 
