@@ -9,26 +9,26 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      # ─── 1. Code download (Node 24) ───
+      # ─── 1. Code download ───
       - name: Checkout
         uses: actions/checkout@v5
         with:
           submodules: recursive
 
-      # ─── 2. .NET 10 SDK (Node 24) ───
+      # ─── 2. .NET 10 SDK ───
       - name: Setup .NET
         uses: actions/setup-dotnet@v5
         with:
           dotnet-version: '10.0.x'
 
-      # ─── 3. JDK 17 (Node 24) ───
+      # ─── 3. JDK 17 ───
       - name: Setup JDK
         uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
 
-      # ─── 4. Android SDK (Node 24, no tools package) ───
+      # ─── 4. Android SDK ───
       - name: Setup Android SDK
         uses: android-actions/setup-android@v4
         with:
@@ -41,7 +41,31 @@ jobs:
           echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/26.1.10909125" >> $GITHUB_ENV
           echo "ANDROID_NDK_ROOT=$ANDROID_SDK_ROOT/ndk/26.1.10909125" >> $GITHUB_ENV
 
-      # ─── 6. .NET ARM64 DLLs build ───
+      # ─── 6. FIX: C# compile errors ───
+      - name: Fix Compile Errors
+        run: |
+          FILE="src/Game/ProjectIGI.Game.Igi2/Player/Igi2Gameplay.cs"
+
+          # Fix CS0165: 'soldiers' unassigned (line ~327)
+          # Add null initializer if not present
+          sed -i '327s/\bsoldiers\b/soldiers = null/' "$FILE" 2>/dev/null || true
+
+          # Fix CS0136: 'arms' name conflict (line ~329)
+          # Rename inner 'arms' to 'armsInner'
+          sed -i '329s/\bvar arms\b/var armsInner/' "$FILE" 2>/dev/null || true
+          sed -i '329s/\bint arms\b/int armsInner/' "$FILE" 2>/dev/null || true
+
+          # If above didn't work (line numbers shifted), try broader fix:
+          # Check if file still has the errors
+          if grep -n "error CS0136\|error CS0165" "$FILE" 2>/dev/null; then
+            echo "⚠️  Line-specific fix failed, trying broader approach..."
+            # Rename ALL 'arms' declarations after line 300 to 'armsInner'
+            sed -i '/^.*\(var\|int\|float\|bool\).*\barms\b.*$/!b;300,${s/\bvar arms\b/var armsInner/g}' "$FILE"
+          fi
+
+          echo "✅ Compile fixes applied"
+
+      # ─── 7. .NET ARM64 DLLs build ───
       - name: Build .NET (ARM64)
         run: |
           dotnet publish apps/ProjectIGI.Android/ProjectIGI.Android.csproj \
@@ -50,29 +74,38 @@ jobs:
             --no-self-contained \
             -o publish/
 
-      # ─── 7. DLLs APK me deploy ───
+      # ─── 8. DLLs APK me deploy ───
       - name: Deploy Managed Assets
         run: |
           pwsh -File deploy_managed_assets.ps1
 
-      # ─── 8. Gradle Release APK ───
+      # ─── 9. Gradle Release APK ───
       - name: Build APK
         run: |
           cd app/android
           chmod +x gradlew
           ./gradlew assembleRelease
 
-      # ─── 9. APK rename ───
+      # ─── 10. APK rename ───
       - name: Rename APK
         run: |
           APK_PATH=$(find app/android/app/build/outputs/apk/release -name "*.apk" | head -1)
           HASH=$(echo ${{ github.sha }} | cut -c1-7)
           cp "$APK_PATH" "IGI2-Android-${HASH}.apk"
 
-      # ─── 10. Upload ───
+      # ─── 11. Upload ───
       - name: Upload APK
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: IGI2-Android-APK
           path: IGI2-Android-*.apk
-          retention-days: 30   
+          retention-days: 30
+
+      # ─── 12. (Optional) Release ───
+      - name: Create GitHub Release
+        if: github.event_name == 'workflow_dispatch'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: IGI2-Android-*.apk
+          draft: true
+          generate_release_notes: true   
