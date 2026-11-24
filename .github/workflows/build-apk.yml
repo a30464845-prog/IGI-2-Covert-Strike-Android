@@ -9,14 +9,9 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      # ─── 1. Code download (v1.5 = last working build) ───
-      - name: Checkout
-        uses: actions/checkout@v5
-        with:
-          ref: v1.5
-          submodules: recursive
+      
 
-      # ─── 2. .NET 10 SDK ───
+    # ─── 2. .NET 10 SDK ───
       - name: Setup .NET
         uses: actions/setup-dotnet@v5
         with:
