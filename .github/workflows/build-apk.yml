@@ -1,67 +1,237 @@
-name: Build IGI2 Android APK
+name: Covert Strike - Full Pipeline
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [main]
   workflow_dispatch:
 
+concurrency:
+  group: unity-build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  UNITY_VERSION: 6000.0.38f1
+  PROJECT_NAME: CovertStrike
+
 jobs:
-  build:
+  # ============================================
+  # STEP 1: TESTS RUN KARO
+  # ============================================
+  test:
+    name: Run Tests 🧪
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v5
+      - uses: actions/checkout@v4
         with:
-          repository: rayishere0/IGI-2-Covert-Strike-Android
-          ref: improvements_bug_fixes_igi2
-          submodules: recursive
+          fetch-depth: 0
+          lfs: true
 
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v5
+      - name: Cache Library
+        uses: actions/cache@v4
         with:
-          dotnet-version: '10.0.x'
+          path: Library
+          key: Library-${{ env.PROJECT_NAME }}-${{ env.UNITY_VERSION }}
+          restore-keys: |
+            Library-${{ env.PROJECT_NAME }}-
+            Library-
 
-      - name: Setup JDK
-        uses: actions/setup-java@v5
+      - name: Run Unity Tests
+        uses: game-ci/unity-test-runner@v4
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
         with:
-          distribution: temurin
-          java-version: '17'
+          unityVersion: ${{ env.UNITY_VERSION }}
+          testMode: EditMode
+          artifactsPath: test-results
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v4
+      - name: Upload Test Results
+        uses: actions/upload-artifact@v4
         with:
-          packages: platform-tools
+          name: test-results
+          path: test-results
+          retention-days: 7
 
-      - name: Install NDK + CMake + Platform
-        run: |
-          sdkmanager "ndk;26.1.10909125" "cmake;3.22.1" "platforms;android-34" "build-tools;34.0.0"
-          echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/26.1.10909125" >> $GITHUB_ENV
-          echo "ANDROID_NDK_ROOT=$ANDROID_SDK_ROOT/ndk/26.1.10909125" >> $GITHUB_ENV
-
-      - name: Build .NET (ARM64)
-        run: |
-          dotnet publish apps/ProjectIGI.Android/ProjectIGI.Android.csproj \
-            -c Release -r android-arm64 --no-self-contained -o publish/
-
-      - name: Deploy Managed Assets
-        run: |
-          pwsh -File deploy_managed_assets.ps1
-
-      - name: Build APK
-        run: |
-          cd app/android
-          chmod +x gradlew
-          ./gradlew assembleRelease
-
-      - name: Rename APK
-        run: |
-          APK_PATH=$(find app/android/app/build/outputs/apk/release -name "*.apk" | head -1)
-          HASH=$(echo ${{ github.sha }} | cut -c1-7)
-          cp "$APK_PATH" "IGI2-Android-${HASH}.apk"
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v5
+  # ============================================
+  # STEP 2: PC (Windows) BUILD
+  # ============================================
+  build-pc:
+    name: Build Windows 🖥️
+    runs-on: windows-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
         with:
-          name: IGI2-Android-APK
-          path: IGI2-Android-*.apk
-          retention-days: 30   
+          fetch-depth: 0
+          lfs: true
+
+      - name: Cache Library
+        uses: actions/cache@v4
+        with:
+          path: Library
+          key: Library-Windows-${{ env.UNITY_VERSION }}-${{ hashFiles('Assets/**') }}
+          restore-keys: |
+            Library-Windows-${{ env.UNITY_VERSION }}-
+            Library-Windows-
+
+      - name: Build Windows
+        uses: game-ci/unity-builder@v4
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+        with:
+          unityVersion: ${{ env.UNITY_VERSION }}
+          targetPlatform: StandaloneWindows64
+          buildName: ${{ env.PROJECT_NAME }}
+          buildsPath: build/Windows
+
+      - name: Upload PC Build
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-windows
+          path: build/Windows
+          retention-days: 30
+
+  # ============================================
+  # STEP 3: ANDROID BUILD
+  # ============================================
+  build-android:
+    name: Build Android 📱
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          lfs: true
+
+      - name: Cache Library
+        uses: actions/cache@v4
+        with:
+          path: Library
+          key: Library-Android-${{ env.UNITY_VERSION }}-${{ hashFiles('Assets/**') }}
+          restore-keys: |
+            Library-Android-${{ env.UNITY_VERSION }}-
+            Library-Android-
+
+      - name: Build Android AAB
+        uses: game-ci/unity-builder@v4
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+        with:
+          unityVersion: ${{ env.UNITY_VERSION }}
+          targetPlatform: Android
+          androidAppBundle: true
+          androidKeystoreBase64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          androidKeystorePass: ${{ secrets.ANDROID_KEYSTORE_PASS }}
+          androidKeyaliasName: ${{ secrets.ANDROID_KEYALIAS_NAME }}
+          androidKeyaliasPass: ${{ secrets.ANDROID_KEYALIAS_PASS }}
+          buildName: ${{ env.PROJECT_NAME }}
+          buildsPath: build/Android
+
+      - name: Upload Android Build
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-android
+          path: build/Android
+          retention-days: 30
+
+  # ============================================
+  # STEP 4: itch.io PE PUBLISH KARO (PC)
+  # ============================================
+  deploy-itchio:
+    name: Deploy to itch.io 🎮
+    runs-on: ubuntu-latest
+    needs: build-pc
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: build-windows
+          path: build/Windows
+
+      - name: Publish to itch.io
+        uses: manleydev/butler-publish-itchio-action@master
+        env:
+          BUTLER_CREDENTIALS: ${{ secrets.BUTLER_CREDENTIALS }}
+          CHANNEL: windows
+          ITCH_GAME: covert-strike
+          ITCH_USER: tumhara-username
+          PACKAGE: build/Windows
+
+  # ============================================
+  # STEP 5: GOOGLE PLAY PE PUBLISH KARO
+  # ============================================
+  deploy-playstore:
+    name: Deploy to Play Store 📲
+    runs-on: ubuntu-latest
+    needs: build-android
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: build-android
+          path: build/Android
+
+      - name: Authenticate Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+
+      - name: Upload to Play Store (Internal Testing)
+        uses: RageAgainstThePixel/upload-google-play-console@v1
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          release-directory: build/Android
+
+  # ============================================
+  # STEP 6: GITHUB RELEASE BANAO
+  # ============================================
+  release:
+    name: Create GitHub Release 📦
+    runs-on: ubuntu-latest
+    needs: [build-pc, build-android]
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: build-windows
+          path: build/Windows
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: build-android
+          path: build/Android
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            build/Windows/**
+            build/Android/**
+          draft: false
+          prerelease: false
+
+  # ============================================
+  # STEP 7: DISCORD NOTIFICATION
+  # ============================================
+  notify:
+    name: Discord Notification 🔔
+    runs-on: ubuntu-latest
+    needs: [deploy-itchio, deploy-playstore]
+    if: always()
+    steps:
+      - name: Send Discord Message
+        uses: Ilshidur/action-discord@0.3
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+        with:
+          args: |
+            **Covert Strike Build**
+            Status: ${{ needs.build-pc.result }} (PC) / ${{ needs.build-android.result }} (Android)
+            Commit: ${{ github.sha }}
+            By: ${{ github.actor }}   
