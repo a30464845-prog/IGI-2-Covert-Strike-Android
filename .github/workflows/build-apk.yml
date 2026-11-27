@@ -1,138 +1,321 @@
-name: Covert Strike - Full Pipeline
+name: City Chase - Auto Build & Deploy
 
 on:
   push:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
 concurrency:
-  group: unity-build-${{ github.ref }}
+  group: pages
   cancel-in-progress: true
 
-env:
-  UNITY_VERSION: 6000.0.38f1
-  PROJECT_NAME: CovertStrike
-
 jobs:
-  # ============================================
-  # STEP 1: TESTS
-  # ============================================
-  test:
-    name: Run Tests
+  build-and-deploy:
+    name: Build & Deploy
     runs-on: ubuntu-latest
+    container:
+      image: barichello/godot-ci:4.7
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          lfs: true
 
-      - name: Run Unity Tests
-        uses: game-ci/unity-test-runner@v4.3.2
-        env:
-          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
-          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
-          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
-        with:
-          unityVersion: ${{ env.UNITY_VERSION }}
-          testMode: EditMode
-          artifactsPath: test-results
-          githubToken: ${{ secrets.GITHUB_TOKEN }}
+      - name: Create Game Files
+        run: |
+          # ==========================================
+          # PROJECT FILE
+          # ==========================================
+          cat > project.godot << 'GOEOF'
+          config_version=5
 
-      - name: Upload Test Results
-        if: always()
+          [application]
+          config/name="CityChase"
+          run/main_scene="res://main.tscn"
+          config/features=PackedStringArray("4.7")
+
+          [display]
+          window/size/viewport_width=1280
+          window/size/viewport_height=720
+
+          [rendering]
+          renderer/rendering_method="mobile"
+          renderer/rendering_method.mobile="mobile"
+          GOEOF
+
+          # ==========================================
+          # EXPORT PRESETS (Web - single threaded)
+          # ==========================================
+          cat > export_presets.cfg << 'GOEOF'
+          [preset.0]
+          name="Web"
+          platform="Web"
+          runnable=true
+          export_filter="all_resources"
+          include_filter=""
+          exclude_filter=""
+          export_path="build/web/index.html"
+
+          [preset.0.options]
+          variant/thread_support=false
+          variant/extensions_support=false
+          html/canvas_resize_policy=2
+          html/focus_canvas_on_start=true
+          progressive_web_app/enabled=false
+          GOEOF
+
+          # ==========================================
+          # MAIN SCENE
+          # ==========================================
+          cat > main.tscn << 'GOEOF'
+          [gd_scene load_steps=10 format=3]
+
+          [ext_resource type="Script" path="res://main.gd" id="1_script"]
+
+          [sub_resource type="PlaneMesh" id="ground_mesh"]
+          size = Vector2(200, 200)
+
+          [sub_resource type="StandardMaterial3D" id="ground_mat"]
+          albedo_color = Color(0.2, 0.35, 0.2, 1)
+
+          [sub_resource type="BoxMesh" id="car_mesh"]
+          size = Vector3(2, 1, 4)
+
+          [sub_resource type="StandardMaterial3D" id="car_mat"]
+          albedo_color = Color(0.8, 0.1, 0.1, 1)
+
+          [sub_resource type="BoxMesh" id="bldg_mesh"]
+          size = Vector3(8, 15, 8)
+
+          [sub_resource type="StandardMaterial3D" id="bldg_mat"]
+          albedo_color = Color(0.6, 0.6, 0.65, 1)
+
+          [sub_resource type="BoxMesh" id="bldg_mesh2"]
+          size = Vector3(6, 25, 6)
+
+          [sub_resource type="StandardMaterial3D" id="bldg_mat2"]
+          albedo_color = Color(0.4, 0.5, 0.7, 1)
+
+          [node name="Main" type="Node3D"]
+          script = ExtResource("1_script")
+
+          [node name="Ground" type="MeshInstance3D" parent="."]
+          mesh = SubResource("ground_mesh")
+          surface_material_override/0 = SubResource("ground_mat")
+
+          [node name="Car" type="Node3D" parent="."]
+          position = Vector3(0, 0.5, 0)
+
+          [node name="CarBody" type="MeshInstance3D" parent="Car"]
+          mesh = SubResource("car_mesh")
+          surface_material_override/0 = SubResource("car_mat")
+
+          [node name="Camera" type="Camera3D" parent="."]
+          position = Vector3(0, 8, 15)
+          current = true
+
+          [node name="Sun" type="DirectionalLight3D" parent="."]
+          rotation = Vector3(-0.8, 0.5, 0)
+          shadow_enabled = true
+
+          [node name="Building1" type="MeshInstance3D" parent="."]
+          mesh = SubResource("bldg_mesh")
+          surface_material_override/0 = SubResource("bldg_mat")
+          position = Vector3(15, 7.5, -10)
+
+          [node name="Building2" type="MeshInstance3D" parent="."]
+          mesh = SubResource("bldg_mesh2")
+          surface_material_override/0 = SubResource("bldg_mat2")
+          position = Vector3(-20, 12.5, -25)
+
+          [node name="Building3" type="MeshInstance3D" parent="."]
+          mesh = SubResource("bldg_mesh")
+          surface_material_override/0 = SubResource("bldg_mat")
+          position = Vector3(30, 7.5, 15)
+
+          [node name="Building4" type="MeshInstance3D" parent="."]
+          mesh = SubResource("bldg_mesh2")
+          surface_material_override/0 = SubResource("bldg_mat2")
+          position = Vector3(-15, 12.5, 20)
+
+          [node name="Building5" type="MeshInstance3D" parent="."]
+          mesh = SubResource("bldg_mesh")
+          surface_material_override/0 = SubResource("bldg_mat")
+          position = Vector3(5, 7.5, -40)
+
+          [node name="Building6" type="MeshInstance3D" parent="."]
+          mesh = SubResource("bldg_mesh")
+          surface_material_override/0 = SubResource("bldg_mat2")
+          position = Vector3(-35, 7.5, 5)
+
+          [node name="Building7" type="MeshInstance3D" parent="."]
+          mesh = SubResource("bldg_mesh2")
+          surface_material_override/0 = SubResource("bldg_mat")
+          position = Vector3(40, 12.5, -30)
+
+          [node name="Building8" type="MeshInstance3D" parent="."]
+          mesh = SubResource("bldg_mesh")
+          surface_material_override/0 = SubResource("bldg_mat2")
+          position = Vector3(-45, 7.5, -15)
+
+          [node name="UI" type="CanvasLayer" parent="."]
+
+          [node name="Title" type="Label" parent="UI"]
+          offset_left = 20.0
+          offset_top = 10.0
+          offset_right = 400.0
+          offset_bottom = 50.0
+          text = "CITY CHASE"
+          theme_override_font_sizes/font_size = 32
+
+          [node name="Controls" type="Label" parent="UI"]
+          offset_left = 20.0
+          offset_top = 55.0
+          offset_right = 400.0
+          offset_bottom = 120.0
+          text = "W/A/S/D = Drive
+          Mouse = Camera
+          Shift = Boost"
+          theme_override_font_sizes/font_size = 16
+          GOEOF
+
+          # ==========================================
+          # MAIN SCRIPT (Car Controller)
+          # ==========================================
+          cat > main.gd << 'GOEOF'
+          extends Node3D
+
+          var car: Node3D
+          var camera: Camera3D
+          var speed := 0.0
+          var max_speed := 25.0
+          var boost_speed := 40.0
+          var acceleration := 20.0
+          var friction := 15.0
+          var turn_speed := 2.5
+          var cam_distance := 15.0
+          var cam_height := 8.0
+          var cam_lerp := 5.0
+          var mouse_sensitivity := 0.003
+          var cam_yaw := 0.0
+          var cam_pitch := -0.3
+
+          func _ready():
+              car = $Car
+              camera = $Camera
+              Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+
+          func _unhandled_input(event):
+              if event is InputEventMouseButton:
+                  if event.button_index == MOUSE_BUTTON_LEFT:
+                      if Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
+                          Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+                      else:
+                          Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+              if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
+                  cam_yaw -= event.relative.x * mouse_sensitivity
+                  cam_pitch -= event.relative.y * mouse_sensitivity
+                  cam_pitch = clampf(cam_pitch, -1.2, 0.2)
+
+          func _physics_process(delta):
+              var input_dir := Vector3.ZERO
+              var current_max := max_speed
+
+              if Input.is_key_pressed(KEY_W) or Input.is_key_pressed(KEY_UP):
+                  input_dir.z = -1.0
+              if Input.is_key_pressed(KEY_S) or Input.is_key_pressed(KEY_DOWN):
+                  input_dir.z = 1.0
+              if Input.is_key_pressed(KEY_A) or Input.is_key_pressed(KEY_LEFT):
+                  input_dir.x = -1.0
+              if Input.is_key_pressed(KEY_D) or Input.is_key_pressed(KEY_RIGHT):
+                  input_dir.x = 1.0
+
+              if Input.is_key_pressed(KEY_SHIFT):
+                  current_max = boost_speed
+
+              if input_dir != Vector3.ZERO:
+                  speed = move_toward(speed, current_max, acceleration * delta)
+                  if input_dir.x != 0.0:
+                      car.rotation.y += input_dir.x * turn_speed * delta * signf(speed)
+              else:
+                  speed = move_toward(speed, 0.0, friction * delta)
+
+              var forward := Vector3.ZERO
+              forward = forward.rotated(Vector3.UP, car.rotation.y)
+              car.position += forward * speed * delta
+              car.position.y = 0.5
+
+              # Camera follow (orbit)
+              var cam_offset := Vector3.ZERO
+              cam_offset.x = sinf(cam_yaw) * cosf(cam_pitch) * cam_distance
+              cam_offset.y = -sinf(cam_pitch) * cam_distance
+              cam_offset.z = cosf(cam_yaw) * cosf(cam_pitch) * cam_distance
+              var target_cam_pos := car.position + Vector3(0, cam_height, 0) + cam_offset
+              camera.position = camera.position.lerp(target_cam_pos, cam_lerp * delta)
+              camera.look_at(car.position + Vector3(0, 1, 0))
+
+              # Touch controls (mobile)
+              if OS.has_feature("mobile"):
+                  _handle_touch(delta)
+
+          func _handle_touch(delta):
+              var touch_forward := 0.0
+              var touch_turn := 0.0
+              for touch in Input.get_pressed_touches():
+                  var t := Input.get_touch_location(touch)
+                  if t.x < 200:
+                      if t.y > 400:
+                          touch_forward = -1.0
+                      elif t.y < 300:
+                          touch_forward = 1.0
+                  elif t.x > 1000:
+                      if t.x > 1100:
+                          touch_turn = 1.0
+                      else:
+                          touch_turn = -1.0
+              if touch_forward != 0.0:
+                  speed = move_toward(speed, max_speed * touch_forward, acceleration * delta)
+                  car.position += Vector3.ZERO.rotated(Vector3.UP, car.rotation.y) * speed * delta
+              if touch_turn != 0.0:
+                  car.rotation.y += touch_turn * turn_speed * delta
+              car.position.y = 0.5
+          GOEOF
+
+      - name: Import Assets
+        run: |
+          godot --headless --import 2>&1 || true
+
+      - name: Export Web
+        run: |
+          mkdir -p build/web
+          godot --headless --export-release "Web" build/web/index.html
+
+      - name: Verify Build
+        run: |
+          if [ ! -f "build/web/index.html" ] || [ ! -f "build/web/index.wasm" ]; then
+            echo "ERROR: Export failed - files missing!"
+            ls -la build/web/
+            exit 1
+          fi
+          echo "Build successful!"
+          du -sh build/web/
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload to Pages
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: build/web
+
+      - name: Deploy to GitHub Pages
+        uses: actions/deploy-pages@v4
+
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: test-results
-          path: test-results
-          retention-days: 7
-
-  # ============================================
-  # STEP 2: PC BUILD
-  # ============================================
-  build-pc:
-    name: Build Windows
-    runs-on: windows-latest
-    needs: test
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          lfs: true
-
-      - name: Build Windows
-        uses: game-ci/unity-builder@v5.0.1
-        env:
-          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
-          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
-          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
-        with:
-          unityVersion: ${{ env.UNITY_VERSION }}
-          targetPlatform: StandaloneWindows64
-          buildName: ${{ env.PROJECT_NAME }}
-          buildsPath: build/Windows
-
-      - name: Upload PC Build
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-windows
-          path: build/Windows
-          retention-days: 30
-
-  # ============================================
-  # STEP 3: ANDROID BUILD
-  # ============================================
-  build-android:
-    name: Build Android
-    runs-on: ubuntu-latest
-    needs: test
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          lfs: true
-
-      - name: Build Android
-        uses: game-ci/unity-builder@v5.0.1
-        env:
-          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
-          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
-          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
-          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          ANDROID_KEYSTORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASS }}
-          ANDROID_KEYALIAS_NAME: ${{ secrets.ANDROID_KEYALIAS_NAME }}
-          ANDROID_KEYALIAS_PASS: ${{ secrets.ANDROID_KEYALIAS_PASS }}
-        with:
-          unityVersion: ${{ env.UNITY_VERSION }}
-          targetPlatform: Android
-          androidKeystoreBase64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          androidKeystorePass: ${{ secrets.ANDROID_KEYSTORE_PASS }}
-          androidKeyaliasName: ${{ secrets.ANDROID_KEYALIAS_NAME }}
-          androidKeyaliasPass: ${{ secrets.ANDROID_KEYALIAS_PASS }}
-          buildName: ${{ env.PROJECT_NAME }}
-          buildsPath: build/Android
-
-      - name: Upload Android Build
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-android
-          path: build/Android
-          retention-days: 30
-
-  # ============================================
-  # STEP 4: DISCORD NOTIFICATION
-  # ============================================
-  notify:
-    name: Discord Notification
-    runs-on: ubuntu-latest
-    needs: [build-pc, build-android]
-    if: always()
-    steps:
-      - name: Send Discord Message
-        uses: Ilshidur/action-discord@0.3
-        env:
-          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
-        with:
-          args: |
-            **Covert Strike Build**
-            PC: ${{ needs.build-pc.result }} | Android: ${{ needs.build-android.result }}
-            Commit: ${{ github.sha }} by ${{ github.actor }}   
+          name: web-build
+          path: build/web/
+          retention-days: 30   
